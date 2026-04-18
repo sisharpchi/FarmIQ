@@ -1,0 +1,71 @@
+@page "/system"
+@attribute [Authorize]
+@inject FarmAdminApiClient ApiClient
+
+<PageTitle>System | FarmIQ Admin</PageTitle>
+
+<h1>System</h1>
+
+<DataState IsLoading="@_isLoading" IsEmpty="false" Error="@_error" LoadingText="Loading system status..." />
+
+@if (_status is not null && string.IsNullOrWhiteSpace(_error))
+{
+    <div class="page-grid">
+        <section class="panel-card">
+            <h2>Service health</h2>
+            <div class="status-grid">
+                <div class="@StatusClass(_healthOk)">API health</div>
+                <div class="@StatusClass(_status.DatabaseConfigured)">Database</div>
+                <div class="@StatusClass(_status.StorageConfigured)">Storage</div>
+                <div class="@StatusClass(_status.WeatherConfigured)">Weather</div>
+            </div>
+        </section>
+
+        <section class="panel-card">
+            <h2>Channel readiness</h2>
+            <div class="status-grid">
+                <div class="@StatusClass(_status.WhatsAppConfigured)">WhatsApp</div>
+                <div class="@StatusClass(_status.TelegramConfigured)">Telegram</div>
+                <div class="@StatusClass(_status.InstagramConfigured)">Instagram</div>
+            </div>
+            <p class="subtle-copy">Server UTC: @_status.ServerUtc.ToString("u")</p>
+        </section>
+
+        <section class="panel-card">
+            <h2>Operational guidance</h2>
+            <ul class="signal-list">
+                <li>Use the Jobs page to retry failed advisory processing runs.</li>
+                <li>Use Deliveries to inspect duplicate webhook events before escalating channel issues.</li>
+                <li>Confirm at least one channel and storage are configured before onboarding live farmers.</li>
+            </ul>
+        </section>
+    </div>
+}
+
+@code {
+    private SystemStatusModel? _status;
+    private bool _healthOk;
+    private string? _error;
+    private bool _isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            _status = await ApiClient.GetStatusAsync();
+            _healthOk = await ApiClient.IsApiHealthyAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private static string StatusClass(bool ok) => ok ? "status-pill ok" : "status-pill bad";
+}

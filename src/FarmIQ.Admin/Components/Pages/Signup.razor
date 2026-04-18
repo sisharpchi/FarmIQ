@@ -1,0 +1,84 @@
+@page "/signup"
+@attribute [AllowAnonymous]
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Sign Up | FarmIQ Admin</PageTitle>
+
+<div class="login-shell">
+    <div class="login-panel">
+        <div class="login-kicker">FarmIQ Admin</div>
+        <h1>Create your operations account</h1>
+        <p class="login-copy">Set up a FarmIQ admin account for analytics review, advisory quality checks, and daily operations.</p>
+
+        <EditForm Model="_model" OnValidSubmit="HandleSignupAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-field">
+                <label>Display name</label>
+                <InputText class="form-control" @bind-Value="_model.DisplayName" />
+            </div>
+
+            <div class="form-field">
+                <label>Email</label>
+                <InputText class="form-control" @bind-Value="_model.Email" />
+            </div>
+
+            <div class="form-field">
+                <label>Password</label>
+                <InputText class="form-control" type="password" @bind-Value="_model.Password" />
+            </div>
+
+            <div class="form-field">
+                <label>Confirm password</label>
+                <InputText class="form-control" type="password" @bind-Value="_model.ConfirmPassword" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+
+            <button class="btn btn-success login-button" type="submit" disabled="@_isSubmitting">
+                @(_isSubmitting ? "Creating account..." : "Create account")
+            </button>
+        </EditForm>
+
+        <div class="auth-switch-copy">
+            Already have an account?
+            <a href="/login">Sign in</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly SignupRequestModel _model = new();
+    private string? _error;
+    private bool _isSubmitting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var session = await AuthService.GetSessionAsync();
+        if (session is not null)
+        {
+            Navigation.NavigateTo("/dashboard", true);
+        }
+    }
+
+    private async Task HandleSignupAsync()
+    {
+        _isSubmitting = true;
+        _error = null;
+        var result = await AuthService.SignupAsync(_model);
+        _isSubmitting = false;
+
+        if (!result.Success)
+        {
+            _error = result.ErrorMessage;
+            return;
+        }
+
+        Navigation.NavigateTo("/dashboard", true);
+    }
+}

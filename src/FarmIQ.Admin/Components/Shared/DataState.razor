@@ -1,0 +1,20 @@
+@if (!string.IsNullOrWhiteSpace(Error))
+{
+    <div class="alert alert-danger">@Error</div>
+}
+else if (IsLoading)
+{
+    <p class="loading-copy">@LoadingText</p>
+}
+else if (IsEmpty)
+{
+    <div class="empty-state">@EmptyText</div>
+}
+
+@code {
+    [Parameter] public bool IsLoading { get; set; }
+    [Parameter] public bool IsEmpty { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public string LoadingText { get; set; } = "Loading...";
+    [Parameter] public string EmptyText { get; set; } = "Nothing to show.";
+}

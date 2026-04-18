@@ -1,0 +1,90 @@
+@page "/deliveries"
+@attribute [Authorize(Roles = "Admin,Ops")]
+@implements IDisposable
+@inject FarmAdminApiClient ApiClient
+@inject RefreshCoordinator RefreshCoordinator
+
+<PageTitle>Deliveries | FarmIQ Admin</PageTitle>
+
+<h1>Deliveries</h1>
+
+<DataState IsLoading="@_isLoading" IsEmpty="@(_issues is not null && _issues.Items.Count == 0)" Error="@_error" LoadingText="Loading delivery issues..." EmptyText="No duplicate or problematic deliveries found." />
+
+@if (_issues is not null && string.IsNullOrWhiteSpace(_error))
+{
+    <section class="panel-card">
+        <div class="table-tools">
+            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+        </div>
+        <table class="table table-darkless">
+            <thead>
+                <tr>
+                    <th>Channel</th>
+                    <th>External message</th>
+                    <th>Duplicate</th>
+                    <th>Linked inbound</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var issue in _issues.Items)
+                {
+                    <tr>
+                        <td>@issue.ChannelType</td>
+                        <td>@issue.ExternalMessageId</td>
+                        <td>@issue.IsDuplicate</td>
+                        <td>@issue.InboundMessageId</td>
+                        <td>@issue.CreatedUtc.ToLocalTime().ToString("g")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <PaginationBar Page="@_page" PageSize="@_pageSize" TotalCount="@_issues.TotalCount" OnPageChanged="HandlePageChangedAsync" />
+    </section>
+}
+
+@code {
+    private PagedResponseModel<DeliveryIssueSummaryModel>? _issues;
+    private IDisposable? _pollingHandle;
+    private string? _error;
+    private bool _isLoading = true;
+    private int _page = 1;
+    private const int _pageSize = 12;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _pollingHandle = RefreshCoordinator.StartPolling(async () =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }, TimeSpan.FromSeconds(12));
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            _issues = await ApiClient.GetDeliveryIssuesAsync(_page, _pageSize);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task HandlePageChangedAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+
+    public void Dispose() => _pollingHandle?.Dispose();
+}

@@ -1,0 +1,96 @@
+@page "/advisories"
+@attribute [Authorize]
+@inject FarmAdminApiClient ApiClient
+
+<PageTitle>Advisories | FarmIQ Admin</PageTitle>
+
+<h1>Advisories</h1>
+
+<div class="page-grid">
+    <section class="panel-card">
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_advisories is not null && _advisories.Items.Count == 0)" Error="@_error" LoadingText="Loading advisories..." EmptyText="No advisories available yet." />
+
+        @if (_advisories is not null && string.IsNullOrWhiteSpace(_error))
+        {
+            <table class="table table-darkless">
+                <thead>
+                    <tr>
+                        <th>Disease</th>
+                        <th>Confidence</th>
+                        <th>Language</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var advisory in _advisories.Items)
+                    {
+                        <tr>
+                            <td>@advisory.DiseaseName</td>
+                            <td>@advisory.ConfidenceScore.ToString("P0")</td>
+                            <td>@advisory.AdvisoryLanguage</td>
+                            <td><button class="btn btn-sm btn-outline-success" @onclick="() => SelectAdvisoryAsync(advisory.AdvisoryId)">View</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <PaginationBar Page="@_page" PageSize="@_pageSize" TotalCount="@_advisories.TotalCount" OnPageChanged="HandlePageChangedAsync" />
+        }
+    </section>
+
+    <section class="panel-card">
+        <h2>Advisory detail</h2>
+        @if (_detail is null)
+        {
+            <p>Select an advisory to view diagnosis, treatment, and weather context.</p>
+        }
+        else
+        {
+            <div class="detail-meta"><strong>@_detail.DiseaseName</strong><span>@_detail.ConfidenceScore.ToString("P0") confidence</span></div>
+            <p>@_detail.AdvisoryText</p>
+            <ul class="signal-list">
+                <li>Treatment: @_detail.TreatmentRecommendation</li>
+                <li>Harvest timing: @_detail.HarvestTiming</li>
+                <li>Weather: @_detail.WeatherSummary</li>
+                <li>Impact: @_detail.CropImpact</li>
+            </ul>
+        }
+    </section>
+</div>
+
+@code {
+    private PagedResponseModel<AdvisorySummaryModel>? _advisories;
+    private AdvisoryDetailModel? _detail;
+    private string? _error;
+    private bool _isLoading = true;
+    private int _page = 1;
+    private const int _pageSize = 12;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            _advisories = await ApiClient.GetAdvisoriesAsync(_page, _pageSize);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SelectAdvisoryAsync(Guid advisoryId) => _detail = await ApiClient.GetAdvisoryDetailAsync(advisoryId);
+
+    private async Task HandlePageChangedAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+}

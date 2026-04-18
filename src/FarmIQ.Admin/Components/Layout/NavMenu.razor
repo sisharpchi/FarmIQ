@@ -1,0 +1,42 @@
+@inject NavigationManager Navigation
+@inject IAuthService AuthService
+
+<AuthorizeView>
+    <Authorized Context="authState">
+        @{
+            var user = authState.User;
+            var canOperate = user.IsInRole("Admin") || user.IsInRole("Ops");
+        }
+        <div class="session-card">
+            <div class="session-name">@authState.User.Identity?.Name</div>
+            <div class="session-roles">@string.Join(" | ", authState.User.Claims.Where(x => x.Type.Contains("role", StringComparison.OrdinalIgnoreCase)).Select(x => x.Value))</div>
+        </div>
+
+        <nav class="nav-links">
+            <NavLink class="nav-link" href="/dashboard">Dashboard</NavLink>
+            <NavLink class="nav-link" href="/conversations">Conversations</NavLink>
+            @if (canOperate)
+            {
+                <NavLink class="nav-link" href="/jobs">Jobs</NavLink>
+                <NavLink class="nav-link" href="/deliveries">Deliveries</NavLink>
+            }
+            <NavLink class="nav-link" href="/advisories">Advisories</NavLink>
+            <NavLink class="nav-link" href="/system">System</NavLink>
+        </nav>
+
+        <button class="btn btn-light logout-button" @onclick="LogoutAsync">Sign out</button>
+    </Authorized>
+    <NotAuthorized>
+        <nav class="nav-links">
+            <NavLink class="nav-link" href="/login">Login</NavLink>
+        </nav>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private async Task LogoutAsync()
+    {
+        await AuthService.LogoutAsync();
+        Navigation.NavigateTo("/login", true);
+    }
+}

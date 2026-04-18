@@ -1,0 +1,26 @@
+@inherits LayoutComponentBase
+
+<AuthBootstrap />
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand-block">
+            <div class="brand-kicker">FarmIQ Admin</div>
+            <div class="brand-title">Crop advisory control center</div>
+        </div>
+        <NavMenu />
+    </aside>
+
+    <main class="main-panel">
+        <header class="topbar">
+            <div>
+                <div class="topbar-label">Operations dashboard</div>
+                <div class="topbar-title">Rural advisory monitoring, diagnostics, and response</div>
+            </div>
+        </header>
+
+        <section class="content-panel">
+            @Body
+        </section>
+    </main>
+</div>

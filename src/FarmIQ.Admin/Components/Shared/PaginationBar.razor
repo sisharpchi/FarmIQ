@@ -1,0 +1,17 @@
+@if (TotalCount > PageSize)
+{
+    <div class="pagination-bar">
+        <button class="btn btn-outline-success btn-sm" disabled="@(Page <= 1)" @onclick="() => OnPageChanged.InvokeAsync(Page - 1)">Previous</button>
+        <span>Page @Page of @TotalPages</span>
+        <button class="btn btn-outline-success btn-sm" disabled="@(Page >= TotalPages)" @onclick="() => OnPageChanged.InvokeAsync(Page + 1)">Next</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int Page { get; set; }
+    [Parameter] public int PageSize { get; set; }
+    [Parameter] public int TotalCount { get; set; }
+    [Parameter] public EventCallback<int> OnPageChanged { get; set; }
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(TotalCount / (double)PageSize));
+}

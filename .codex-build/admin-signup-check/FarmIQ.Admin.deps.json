@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "FarmIQ.Admin/1.0.0": {
+        "dependencies": {
+          "FarmIQ.Shared": "1.0.0"
+        },
+        "runtime": {
+          "FarmIQ.Admin.dll": {}
+        }
+      },
+      "FarmIQ.Shared/1.0.0": {
+        "runtime": {
+          "FarmIQ.Shared.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "FarmIQ.Admin/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "FarmIQ.Shared/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

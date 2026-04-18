@@ -1,0 +1,135 @@
+@page "/jobs"
+@attribute [Authorize(Roles = "Admin,Ops")]
+@implements IDisposable
+@inject FarmAdminApiClient ApiClient
+@inject RefreshCoordinator RefreshCoordinator
+
+<PageTitle>Jobs | FarmIQ Admin</PageTitle>
+
+<h1>Jobs</h1>
+
+<div class="page-grid">
+    <section class="panel-card">
+        <div class="table-tools">
+            <select class="form-select narrow-select" @bind="_selectedStatus">
+                <option value="">All</option>
+                @foreach (var status in Enum.GetValues<ProcessingJobStatus>())
+                {
+                    <option value="@status">@status</option>
+                }
+            </select>
+            <button class="btn btn-outline-success" @onclick="LoadAsync">Apply</button>
+        </div>
+
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_jobs is not null && _jobs.Items.Count == 0)" Error="@_error" LoadingText="Loading jobs..." EmptyText="No jobs matched this filter." />
+
+        @if (_jobs is not null && string.IsNullOrWhiteSpace(_error))
+        {
+            <table class="table table-darkless">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Attempts</th>
+                        <th>Scheduled</th>
+                        <th>Error</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in _jobs.Items)
+                    {
+                        <tr>
+                            <td>@job.Status</td>
+                            <td>@job.Attempts</td>
+                            <td>@job.ScheduledUtc.ToLocalTime().ToString("g")</td>
+                            <td>@job.LastError</td>
+                            <td>
+                                @if (job.Status == ProcessingJobStatus.Failed || job.Status == ProcessingJobStatus.Retrying)
+                                {
+                                    <button class="btn btn-sm btn-success" @onclick="() => RetryAsync(job.JobId)">Retry</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <PaginationBar Page="@_page" PageSize="@_pageSize" TotalCount="@_jobs.TotalCount" OnPageChanged="HandlePageChangedAsync" />
+        }
+    </section>
+
+    <section class="panel-card">
+        <h2>Stuck jobs</h2>
+        @if (_stuckJobs is null)
+        {
+            <p>Loading stuck jobs...</p>
+        }
+        else if (_stuckJobs.Items.Count == 0)
+        {
+            <p>No stuck jobs right now.</p>
+        }
+        else
+        {
+            <ul class="signal-list">
+                @foreach (var job in _stuckJobs.Items)
+                {
+                    <li>@job.JobId | lease @job.LeaseExpiresUtc?.ToLocalTime().ToString("g") | attempts @job.Attempts</li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
+@code {
+    private PagedResponseModel<ProcessingJobSummaryModel>? _jobs;
+    private PagedResponseModel<StuckJobSummaryModel>? _stuckJobs;
+    private IDisposable? _pollingHandle;
+    private ProcessingJobStatus? _selectedStatus;
+    private string? _error;
+    private bool _isLoading = true;
+    private int _page = 1;
+    private const int _pageSize = 12;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _pollingHandle = RefreshCoordinator.StartPolling(async () =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }, TimeSpan.FromSeconds(10));
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            _jobs = await ApiClient.GetJobsAsync(_selectedStatus, _page, _pageSize);
+            _stuckJobs = await ApiClient.GetStuckJobsAsync(1, 12);
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task RetryAsync(Guid jobId)
+    {
+        await ApiClient.RetryJobAsync(jobId);
+        await LoadAsync();
+    }
+
+    private async Task HandlePageChangedAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+
+    public void Dispose() => _pollingHandle?.Dispose();
+}

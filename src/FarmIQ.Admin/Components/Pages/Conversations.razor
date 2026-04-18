@@ -1,0 +1,83 @@
+x@page "/conversations"
+@attribute [Authorize]
+@inject FarmAdminApiClient ApiClient
+
+<PageTitle>Conversations | FarmIQ Admin</PageTitle>
+
+<h1>Conversations</h1>
+
+<div class="page-grid">
+    <section class="panel-card">
+        <div class="table-tools">
+            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+        </div>
+
+        @if (_response is null)
+        {
+            <p>Loading conversations...</p>
+        }
+        else
+        {
+            <table class="table table-darkless">
+                <thead>
+                    <tr>
+                        <th>Farmer</th>
+                        <th>Channel</th>
+                        <th>Inbound</th>
+                        <th>Outbound</th>
+                        <th>Last message</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in _response.Items)
+                    {
+                        <tr>
+                            <td>@item.FarmerName</td>
+                            <td>@item.ChannelType</td>
+                            <td>@item.InboundCount</td>
+                            <td>@item.OutboundCount</td>
+                            <td>@item.LastMessageUtc.ToLocalTime().ToString("g")</td>
+                            <td><button class="btn btn-sm btn-outline-success" @onclick="() => SelectConversationAsync(item.ConversationId)">View</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+
+    <section class="panel-card">
+        <h2>Conversation detail</h2>
+        @if (_detail is null)
+        {
+            <p>Select a conversation to inspect the message timeline.</p>
+        }
+        else
+        {
+            <div class="detail-meta">
+                <strong>@_detail.FarmerName</strong>
+                <span>@_detail.ChannelType</span>
+            </div>
+            <div class="timeline">
+                @foreach (var message in _detail.Messages)
+                {
+                    <div class="timeline-item">
+                        <div class="timeline-head">@message.Direction <span>@message.CreatedUtc.ToLocalTime().ToString("g")</span></div>
+                        <div>@(string.IsNullOrWhiteSpace(message.Text) ? "No text payload" : message.Text)</div>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private PagedResponseModel<ConversationSummaryModel>? _response;
+    private ConversationDetailModel? _detail;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync() => _response = await ApiClient.GetConversationsAsync(1, 20);
+
+    private async Task SelectConversationAsync(Guid id) => _detail = await ApiClient.GetConversationDetailAsync(id);
+}

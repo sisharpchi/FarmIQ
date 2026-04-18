@@ -1,0 +1,6 @@
+@FarmIQ.API_HostAddress = http://localhost:5015
+
+GET {{FarmIQ.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

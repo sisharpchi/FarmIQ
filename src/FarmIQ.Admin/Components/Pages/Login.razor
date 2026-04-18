@@ -1,0 +1,73 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject IAuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>Login | FarmIQ Admin</PageTitle>
+
+<div class="login-shell">
+    <div class="login-panel">
+        <div class="login-kicker">FarmIQ Admin</div>
+        <h1>Sign in to the field operations console</h1>
+        <p class="login-copy">Monitor farmer conversations, troubleshoot delivery issues, and recover advisory jobs from one place.</p>
+
+        <EditForm Model="_model" OnValidSubmit="HandleLoginAsync">
+            <DataAnnotationsValidator />
+
+            <div class="form-field">
+                <label>Email</label>
+                <InputText class="form-control" @bind-Value="_model.Email" />
+            </div>
+
+            <div class="form-field">
+                <label>Password</label>
+                <InputText class="form-control" type="password" @bind-Value="_model.Password" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+
+            <button class="btn btn-success login-button" type="submit" disabled="@_isSubmitting">
+                @(_isSubmitting ? "Signing in..." : "Sign in")
+            </button>
+        </EditForm>
+
+        <div class="auth-switch-copy">
+            Need an account?
+            <a href="/signup">Create one here</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private readonly LoginRequestModel _model = new();
+    private string? _error;
+    private bool _isSubmitting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var session = await AuthService.GetSessionAsync();
+        if (session is not null)
+        {
+            Navigation.NavigateTo("/dashboard", true);
+        }
+    }
+
+    private async Task HandleLoginAsync()
+    {
+        _isSubmitting = true;
+        _error = null;
+        var result = await AuthService.LoginAsync(_model);
+        _isSubmitting = false;
+
+        if (!result.Success)
+        {
+            _error = result.ErrorMessage;
+            return;
+        }
+
+        Navigation.NavigateTo("/dashboard", true);
+    }
+}

@@ -1,0 +1,107 @@
+@page "/"
+@page "/dashboard"
+@attribute [Authorize]
+@implements IDisposable
+@inject FarmAdminApiClient ApiClient
+@inject RefreshCoordinator RefreshCoordinator
+
+<PageTitle>Dashboard | FarmIQ Admin</PageTitle>
+
+<h1>Dashboard</h1>
+
+<DataState IsLoading="@(_analytics is null || _status is null)" IsEmpty="false" Error="@_error" LoadingText="Loading dashboard..." />
+
+@if (_analytics is not null && _status is not null)
+{
+    <div class="grid-cards">
+        <div class="metric-card"><span>Farmers</span><strong>@_analytics.TotalFarmers</strong></div>
+        <div class="metric-card"><span>Conversations</span><strong>@_analytics.TotalConversations</strong></div>
+        <div class="metric-card"><span>Failed jobs</span><strong>@_analytics.FailedJobs</strong></div>
+        <div class="metric-card"><span>Duplicate deliveries</span><strong>@_analytics.DuplicateDeliveries</strong></div>
+        <div class="metric-card"><span>Completed advisories</span><strong>@_analytics.CompletedAdvisories</strong></div>
+        <div class="metric-card"><span>Stuck jobs</span><strong>@_analytics.StuckJobs</strong></div>
+    </div>
+
+    <div class="page-grid">
+        <section class="panel-card">
+            <h2>System readiness</h2>
+            <div class="status-grid">
+                <div class="@StatusClass(_healthOk)">API health: @(_healthOk ? "Healthy" : "Unavailable")</div>
+                <div class="@StatusClass(_status.DatabaseConfigured)">Database configured</div>
+                <div class="@StatusClass(_status.StorageConfigured)">Storage configured</div>
+                <div class="@StatusClass(_status.WeatherConfigured)">Weather configured</div>
+                <div class="@StatusClass(_status.WhatsAppConfigured)">WhatsApp configured</div>
+                <div class="@StatusClass(_status.TelegramConfigured)">Telegram configured</div>
+                <div class="@StatusClass(_status.InstagramConfigured)">Instagram configured</div>
+            </div>
+        </section>
+
+        <section class="panel-card">
+            <h2>Current focus</h2>
+            <ul class="signal-list">
+                <li>@_analytics.FailedJobs failed jobs need attention.</li>
+                <li>@_analytics.StuckJobs stuck jobs are waiting for intervention.</li>
+                <li>@_analytics.DuplicateDeliveries duplicate webhook deliveries were recorded.</li>
+                <li>Server time: @_status.ServerUtc.ToLocalTime().ToString("g")</li>
+                @if (_lastUpdatedUtc.HasValue)
+                {
+                    <li>UI last refreshed: @_lastUpdatedUtc.Value.ToLocalTime().ToString("g")</li>
+                }
+            </ul>
+        </section>
+    </div>
+
+    @if (_insights is not null)
+    {
+        <section class="panel-card">
+            <h2>B2B insight snapshot</h2>
+            <div class="grid-cards compact-cards">
+                <div class="metric-card"><span>Farmers in aggregate</span><strong>@_insights.TotalFarmers</strong></div>
+                <div class="metric-card"><span>Conversations in aggregate</span><strong>@_insights.TotalConversations</strong></div>
+                <div class="metric-card"><span>Completed advisories</span><strong>@_insights.CompletedAdvisories</strong></div>
+                <div class="metric-card"><span>Failed jobs</span><strong>@_insights.FailedJobs</strong></div>
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private AnalyticsSummaryModel? _analytics;
+    private InsightSummaryModel? _insights;
+    private SystemStatusModel? _status;
+    private bool _healthOk;
+    private IDisposable? _pollingHandle;
+    private string? _error;
+    private DateTime? _lastUpdatedUtc;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _pollingHandle = RefreshCoordinator.StartPolling(async () =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _error = null;
+            _analytics = await ApiClient.GetAnalyticsAsync();
+            _insights = await ApiClient.GetInsightsAsync();
+            _status = await ApiClient.GetStatusAsync();
+            _healthOk = await ApiClient.IsApiHealthyAsync();
+            _lastUpdatedUtc = DateTime.UtcNow;
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+    }
+
+    private static string StatusClass(bool ok) => ok ? "status-pill ok" : "status-pill bad";
+
+    public void Dispose() => _pollingHandle?.Dispose();
+}
