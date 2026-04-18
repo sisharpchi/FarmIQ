@@ -126,6 +126,41 @@ public sealed class FarmWorkflowTests
     }
 
     [Fact]
+    public async Task AcceptAsync_ShouldPromptForProblemDetailsWhenOnlyPhotoIsSentWithoutContext()
+    {
+        await using var dbContext = CreateDbContext();
+        var queue = new FakeBackgroundJobQueue();
+        var service = CreateIngestionService(dbContext, queue);
+
+        var result = await service.AcceptAsync(new NormalizedInboundMessageCommand
+        {
+            ChannelType = ChannelType.Telegram,
+            ExternalUserId = "farmer-photo",
+            ExternalConversationId = "chat-photo",
+            ExternalMessageId = "msg-photo",
+            IncomingLanguage = "en",
+            Media =
+            [
+                new InboundMediaDto
+                {
+                    ChannelType = ChannelType.Telegram,
+                    MediaType = MediaType.Image,
+                    ExternalMediaId = "photo-1",
+                    Url = "photo-1",
+                    FileName = "leaf.jpg",
+                    ContentType = "image/jpeg"
+                }
+            ]
+        });
+
+        result.AcceptedMessage.Status.Should().Be(MessageLifecycleStatus.Replied);
+        dbContext.ProcessingJobs.Should().BeEmpty();
+        dbContext.OutboundMessages.Should().ContainSingle();
+        dbContext.InboundMessages.Single().DetectedIntent.Should().Be(InboundIntentType.MediaOnly);
+        queue.JobIds.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RetryJobAsync_ShouldResetStatusAndRequeue()
     {
         await using var dbContext = CreateDbContext();
@@ -257,6 +292,26 @@ public sealed class FarmWorkflowTests
     }
 
     [Fact]
+    public async Task TelegramService_ShouldGracefullyIgnoreUnsupportedUpdates()
+    {
+        var service = new TelegramService(new FakeHttpClientFactory(), Options.Create(new ChannelApiOptions()), NullLogger<TelegramService>.Instance);
+        var command = await service.ParseAsync(new WebhookEnvelopeDto
+        {
+            RawBody = """
+            {
+              "update_id": 9,
+              "callback_query": {
+                "id": "cb-1"
+              }
+            }
+            """
+        });
+
+        command.IsUnsupportedEvent.Should().BeTrue();
+        command.IgnoredReason.Should().Be("missing_message");
+    }
+
+    [Fact]
     public async Task WhatsAppService_ShouldParseImagePayload()
     {
         var service = new WhatsAppService(
@@ -332,6 +387,62 @@ public sealed class FarmWorkflowTests
         command.ExternalUserId.Should().Be("ig-user-1");
         command.Text.Should().Be("banana leaves drying");
         command.IsUnsupportedEvent.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InstagramService_ShouldGracefullyIgnoreNonMessageWebhook()
+    {
+        var service = new InstagramService(
+            new FakeHttpClientFactory(),
+            Options.Create(new ChannelApiOptions()),
+            Options.Create(new WebhookOptions()),
+            NullLogger<InstagramService>.Instance);
+
+        var command = await service.ParseAsync(new WebhookEnvelopeDto
+        {
+            RawBody = """
+            {
+              "entry": [
+                {
+                  "messaging": [
+                    {
+                      "sender": { "id": "ig-user-1" },
+                      "recipient": { "id": "page-1" },
+                      "postback": { "title": "Get Started" }
+                    }
+                  ]
+                }
+              ]
+            }
+            """
+        });
+
+        command.IsUnsupportedEvent.Should().BeTrue();
+        command.IgnoredReason.Should().Be("missing_message");
+    }
+
+    [Fact]
+    public async Task WhatsAppService_ShouldRejectInvalidSignature()
+    {
+        var service = new WhatsAppService(
+            new FakeHttpClientFactory(),
+            Options.Create(new ChannelApiOptions()),
+            Options.Create(new WebhookOptions
+            {
+                WhatsAppAppSecret = "test-secret"
+            }),
+            NullLogger<WhatsAppService>.Instance);
+
+        var action = async () => await service.ParseAsync(new WebhookEnvelopeDto
+        {
+            RawBody = "{\"entry\":[]}",
+            Headers = new Dictionary<string, string>
+            {
+                ["X-Hub-Signature-256"] = "sha256=invalid"
+            }
+        });
+
+        await action.Should().ThrowAsync<UnauthorizedAccessException>();
     }
 
     private static FarmIQDbContext CreateDbContext()

@@ -72,7 +72,7 @@
     private bool _isSubmitting;
     private bool _redirected;
 
-    private bool PublicSignupEnabled => Configuration.GetValue<bool>("Features:EnablePublicSignup");
+    private bool PublicSignupEnabled => Configuration.GetValue<bool>("Auth:EnablePublicSignup");
 
     protected override void OnAfterRender(bool firstRender)
     {

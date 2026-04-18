@@ -111,11 +111,15 @@ public sealed class InboundIntentClassifier : IInboundIntentClassifier
 
         if (command.Media.Count > 0 && string.IsNullOrWhiteSpace(normalizedText))
         {
+            var canProcessMediaImmediately =
+                command.Media.Any(x => x.MediaType is MediaType.Voice or MediaType.Audio) ||
+                conversation?.AssistantState == ConversationAssistantState.AwaitingPhoto;
+
             command.IntentType = InboundIntentType.MediaOnly;
             return new IntentClassificationResult(
                 InboundIntentType.MediaOnly,
-                QueueForAdvisory: true,
-                SendImmediateResponse: false,
+                QueueForAdvisory: canProcessMediaImmediately,
+                SendImmediateResponse: !canProcessMediaImmediately,
                 NextState: ConversationAssistantState.AwaitingProblemDetails);
         }
 
@@ -129,7 +133,8 @@ public sealed class InboundIntentClassifier : IInboundIntentClassifier
                 NextState: ConversationAssistantState.AwaitingProblemDetails);
         }
 
-        if (command.Media.Count > 0 || LooksLikeSymptomReport(normalizedText, conversation))
+        if (LooksLikeSymptomReport(normalizedText, conversation) ||
+            (command.Media.Count > 0 && HasActionableMediaCaption(normalizedText)))
         {
             command.IntentType = command.Media.Count > 0 ? InboundIntentType.MediaOnly : InboundIntentType.SymptomReport;
             return new IntentClassificationResult(
@@ -192,6 +197,12 @@ public sealed class InboundIntentClassifier : IInboundIntentClassifier
 
         return SymptomSignals.Any(signal => text.Contains(signal, StringComparison.OrdinalIgnoreCase));
     }
+
+    private static bool HasActionableMediaCaption(string text) =>
+        !string.IsNullOrWhiteSpace(text) && !IsGreeting(text) && !IsSmallTalk(text);
+
+    private static bool IsSmallTalk(string text) =>
+        SmallTalkTokens.Any(token => string.Equals(text, token, StringComparison.OrdinalIgnoreCase));
 }
 
 public sealed class ConversationResponseComposer(ILanguageService languageService) : IConversationResponseComposer
@@ -226,6 +237,11 @@ public sealed class ConversationResponseComposer(ILanguageService languageServic
             InboundIntentType.SmallTalk => """
                 I need a little more detail before I can help.
                 Send the crop name, the main symptom, and a clear photo if you have one.
+                """,
+            InboundIntentType.MediaOnly => """
+                I received your media.
+                Now send one short sentence with the crop name and the main symptom.
+                Example: "Tomato leaves have brown spots" or "Aphids are spreading on my peppers."
                 """,
             InboundIntentType.LocationShare => BuildLocationReply(conversation),
             _ => null

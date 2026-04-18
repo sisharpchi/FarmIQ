@@ -11,6 +11,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
 
 namespace FarmIQ.Infrastructure.Services;
 
@@ -31,6 +33,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<SeedAdminOptions>()
             .Bind(configuration.GetSection(SeedAdminOptions.SectionName))
             .Validate(x => !string.IsNullOrWhiteSpace(x.Email) && !string.IsNullOrWhiteSpace(x.Password), "Seed admin email and password are required.")
+            .Validate(x => environment.IsDevelopment() || !x.UsesDefaultCredentials(), "Seed admin credentials must be overridden outside development.")
             .ValidateOnStart();
         services.AddOptions<WebhookOptions>()
             .Bind(configuration.GetSection(WebhookOptions.SectionName))
@@ -52,6 +55,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<AuthOptions>()
             .Bind(configuration.GetSection(AuthOptions.SectionName))
             .Validate(x => x.AccessTokenLifetimeMinutes > 0, "Auth access token lifetime must be positive.")
+            .Validate(x => environment.IsDevelopment() || HasStrongKey(x.SigningKey), "Auth:SigningKey must be configured with at least 32 characters outside development.")
+            .Validate(x => environment.IsDevelopment() || HasStrongKey(x.EncryptionKey), "Auth:EncryptionKey must be configured with at least 32 characters outside development.")
             .ValidateOnStart();
 
         services.AddDbContext<FarmIQDbContext>(options =>
@@ -96,8 +101,8 @@ public static class InfrastructureServiceCollectionExtensions
                 }
                 else
                 {
-                    options.AddEphemeralEncryptionKey()
-                        .AddEphemeralSigningKey();
+                    options.AddEncryptionKey(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authOptions.EncryptionKey!)))
+                        .AddSigningKey(new SymmetricSecurityKey(Encoding.UTF8.GetBytes(authOptions.SigningKey!)));
                 }
 
                 options.UseAspNetCore()
@@ -144,6 +149,9 @@ public static class InfrastructureServiceCollectionExtensions
 
         return services;
     }
+
+    private static bool HasStrongKey(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Trim().Length >= 32;
 
     public static async Task SeedIdentityAsync(this IServiceProvider serviceProvider)
     {

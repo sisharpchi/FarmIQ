@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using FarmIQ.Application.Abstractions;
 using FarmIQ.Application.Contracts;
 using FarmIQ.Infrastructure.Configuration;
@@ -75,7 +76,29 @@ public sealed class WebhooksController(
         };
 
         var service = channelResolver.Resolve(channelType);
-        var command = await service.ParseAsync(envelope, cancellationToken);
+        NormalizedInboundMessageCommand command;
+
+        try
+        {
+            command = await service.ParseAsync(envelope, cancellationToken);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Unauthorized(new
+            {
+                error = "invalid_webhook_signature",
+                error_description = exception.Message
+            });
+        }
+        catch (JsonException exception)
+        {
+            return BadRequest(new
+            {
+                error = "invalid_webhook_payload",
+                error_description = exception.Message
+            });
+        }
+
         var accepted = await messageIngestionService.AcceptAsync(command, cancellationToken);
 
         if (accepted.IsDuplicate)

@@ -87,6 +87,30 @@ public abstract class MessageChannelServiceBase : IMessageChannelService
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(body))).ToLowerInvariant();
     }
+
+    protected static NormalizedInboundMessageCommand CreateUnsupportedCommand(
+        ChannelType channelType,
+        string rawBody,
+        IDictionary<string, string> headers,
+        IDictionary<string, string> query,
+        string eventType,
+        string ignoredReason,
+        string? externalUserId = null,
+        string? externalConversationId = null,
+        string? externalMessageId = null) =>
+        new()
+        {
+            ChannelType = channelType,
+            ExternalMessageId = externalMessageId ?? $"{channelType.ToString().ToLowerInvariant()}-unsupported-{Guid.NewGuid():N}",
+            ExternalConversationId = externalConversationId ?? $"{channelType.ToString().ToLowerInvariant()}-conversation",
+            ExternalUserId = externalUserId ?? $"{channelType.ToString().ToLowerInvariant()}-user",
+            OriginalPayloadJson = rawBody,
+            EventType = eventType,
+            IsUnsupportedEvent = true,
+            IgnoredReason = ignoredReason,
+            CorrelationId = BuildCorrelationId(channelType, externalMessageId ?? Guid.NewGuid().ToString("N")),
+            Metadata = headers.Concat(query).ToDictionary(x => x.Key, x => x.Value)
+        };
 }
 
 public sealed class WhatsAppService(
@@ -105,31 +129,61 @@ public sealed class WhatsAppService(
             var expected = $"sha256={HexHmac(webhookOptions.Value.WhatsAppAppSecret, envelope.RawBody)}";
             if (!string.Equals(expected, signature, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Invalid WhatsApp signature.");
+                throw new UnauthorizedAccessException("Invalid WhatsApp signature.");
             }
         }
 
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(envelope.RawBody) ? "{}" : envelope.RawBody);
         var root = document.RootElement;
-        var entry = root.GetProperty("entry")[0];
-        var change = entry.GetProperty("changes")[0];
-        var value = change.GetProperty("value");
+        if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() == 0)
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.WhatsApp,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_entry"));
+        }
+
+        var entry = entries[0];
+        if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array || changes.GetArrayLength() == 0)
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.WhatsApp,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_changes"));
+        }
+
+        var change = changes[0];
+        if (!change.TryGetProperty("value", out var value))
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.WhatsApp,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_value"));
+        }
+
         var messages = value.TryGetProperty("messages", out var msgArray) ? msgArray : default;
         var contacts = value.TryGetProperty("contacts", out var contactArray) ? contactArray : default;
 
         if (messages.ValueKind != JsonValueKind.Array || messages.GetArrayLength() == 0)
         {
-            return Task.FromResult(new NormalizedInboundMessageCommand
-            {
-                ChannelType = ChannelType.WhatsApp,
-                ExternalMessageId = $"wa-unsupported-{Guid.NewGuid():N}",
-                ExternalConversationId = value.TryGetProperty("metadata", out var metadata) ? GetString(metadata, "phone_number_id") ?? "whatsapp-conversation" : "whatsapp-conversation",
-                ExternalUserId = contacts.ValueKind == JsonValueKind.Array && contacts.GetArrayLength() > 0 ? GetString(contacts[0], "wa_id") ?? "whatsapp-user" : "whatsapp-user",
-                OriginalPayloadJson = envelope.RawBody,
-                EventType = "unsupported",
-                IsUnsupportedEvent = true,
-                CorrelationId = BuildCorrelationId(ChannelType.WhatsApp, Guid.NewGuid().ToString("N"))
-            });
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.WhatsApp,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_message",
+                externalUserId: contacts.ValueKind == JsonValueKind.Array && contacts.GetArrayLength() > 0 ? GetString(contacts[0], "wa_id") : null,
+                externalConversationId: value.TryGetProperty("metadata", out var metadata) ? GetString(metadata, "phone_number_id") : null));
         }
 
         var message = messages[0];
@@ -148,7 +202,7 @@ public sealed class WhatsAppService(
             ExternalMessageId = externalMessageId,
             OriginalPayloadJson = envelope.RawBody,
             IncomingLanguage = contacts.ValueKind == JsonValueKind.Array && contacts.GetArrayLength() > 0 ? GetString(contacts[0], "language") : null,
-            DisplayName = contacts.ValueKind == JsonValueKind.Array && contacts.GetArrayLength() > 0 ? GetString(contacts[0].GetProperty("profile"), "name") : null,
+            DisplayName = contacts.ValueKind == JsonValueKind.Array && contacts.GetArrayLength() > 0 && contacts[0].TryGetProperty("profile", out var profile) ? GetString(profile, "name") : null,
             EventType = type,
             CorrelationId = BuildCorrelationId(ChannelType.WhatsApp, externalMessageId),
             Metadata = envelope.Headers.Concat(envelope.Query).ToDictionary(x => x.Key, x => x.Value)
@@ -237,9 +291,28 @@ public sealed class TelegramService(
     {
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(envelope.RawBody) ? "{}" : envelope.RawBody);
         var root = document.RootElement;
-        var message = root.TryGetProperty("message", out var messageElement) ? messageElement : root.GetProperty("edited_message");
-        var chat = message.GetProperty("chat");
-        var from = message.GetProperty("from");
+        if (!root.TryGetProperty("message", out var message) && !root.TryGetProperty("edited_message", out message))
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.Telegram,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_message"));
+        }
+
+        if (!message.TryGetProperty("chat", out var chat) || !message.TryGetProperty("from", out var from))
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.Telegram,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_chat_or_sender"));
+        }
+
         var externalMessageId = GetString(message, "message_id") ?? Guid.NewGuid().ToString("N");
         var command = new NormalizedInboundMessageCommand
         {
@@ -342,17 +415,52 @@ public sealed class InstagramService(
             var expected = $"sha256={HexHmac(webhookOptions.Value.InstagramAppSecret, envelope.RawBody)}";
             if (!string.Equals(expected, signature, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("Invalid Instagram signature.");
+                throw new UnauthorizedAccessException("Invalid Instagram signature.");
             }
         }
 
         using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(envelope.RawBody) ? "{}" : envelope.RawBody);
         var root = document.RootElement;
-        var entry = root.GetProperty("entry")[0];
-        var messaging = entry.GetProperty("messaging")[0];
-        var sender = messaging.GetProperty("sender");
-        var recipient = messaging.GetProperty("recipient");
-        var externalMessageId = GetString(messaging.GetProperty("message"), "mid") ?? Guid.NewGuid().ToString("N");
+        if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array || entries.GetArrayLength() == 0)
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.Instagram,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_entry"));
+        }
+
+        var entry = entries[0];
+        if (!entry.TryGetProperty("messaging", out var messagingArray) || messagingArray.ValueKind != JsonValueKind.Array || messagingArray.GetArrayLength() == 0)
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.Instagram,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: "unsupported",
+                ignoredReason: "missing_messaging"));
+        }
+
+        var messaging = messagingArray[0];
+        var sender = messaging.TryGetProperty("sender", out var senderElement) ? senderElement : default;
+        var recipient = messaging.TryGetProperty("recipient", out var recipientElement) ? recipientElement : default;
+        if (!messaging.TryGetProperty("message", out var message))
+        {
+            return Task.FromResult(CreateUnsupportedCommand(
+                ChannelType.Instagram,
+                envelope.RawBody,
+                envelope.Headers,
+                envelope.Query,
+                eventType: GetString(messaging, "type") ?? "unsupported",
+                ignoredReason: "missing_message",
+                externalUserId: GetString(sender, "id"),
+                externalConversationId: GetString(recipient, "id")));
+        }
+
+        var externalMessageId = GetString(message, "mid") ?? Guid.NewGuid().ToString("N");
         var command = new NormalizedInboundMessageCommand
         {
             ChannelType = ChannelType.Instagram,
@@ -365,7 +473,6 @@ public sealed class InstagramService(
             Metadata = envelope.Headers.Concat(envelope.Query).ToDictionary(x => x.Key, x => x.Value)
         };
 
-        var message = messaging.GetProperty("message");
         command.Text = GetString(message, "text");
 
         if (message.TryGetProperty("attachments", out var attachments) && attachments.ValueKind == JsonValueKind.Array)

@@ -860,7 +860,8 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             ApiHealthy: true,
             DatabaseConfigured: !string.IsNullOrWhiteSpace(connectionString),
             StorageConfigured: !string.IsNullOrWhiteSpace(configuration["Storage:RootPath"]),
-            WeatherConfigured: !string.IsNullOrWhiteSpace(configuration["OpenWeatherMap:BaseUrl"]),
+            WeatherConfigured: !string.IsNullOrWhiteSpace(configuration["OpenWeatherMap:BaseUrl"]) &&
+                               !string.IsNullOrWhiteSpace(configuration["OpenWeatherMap:ApiKey"]),
             WhatsAppConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:WhatsAppBaseUrl"]),
             TelegramConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:TelegramBaseUrl"]),
             InstagramConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:InstagramBaseUrl"]),

@@ -17,9 +17,15 @@ public sealed class LocalStorageOptions
 public sealed class SeedAdminOptions
 {
     public const string SectionName = "SeedAdmin";
-    public string Email { get; set; } = "admin@farmiq.local";
-    public string Password { get; set; } = "FarmIQ!123";
+    public const string DefaultEmail = "admin@farmiq.local";
+    public const string DefaultPassword = "FarmIQ!123";
+    public string Email { get; set; } = DefaultEmail;
+    public string Password { get; set; } = DefaultPassword;
     public string DisplayName { get; set; } = "FarmIQ Admin";
+
+    public bool UsesDefaultCredentials() =>
+        string.Equals(Email, DefaultEmail, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(Password, DefaultPassword, StringComparison.Ordinal);
 }
 
 public sealed class WebhookOptions
@@ -69,4 +75,6 @@ public sealed class AuthOptions
     public const string SectionName = "Auth";
     public bool EnablePublicSignup { get; set; }
     public int AccessTokenLifetimeMinutes { get; set; } = 60;
+    public string? SigningKey { get; set; }
+    public string? EncryptionKey { get; set; }
 }
