@@ -1,11 +1,20 @@
+@inject IAuthService AuthService
 @inject NavigationManager Navigation
 
 @code {
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && !Navigation.Uri.Contains("/login", StringComparison.OrdinalIgnoreCase))
+        if (!firstRender)
         {
-            Navigation.NavigateTo("/login", true);
+            return;
+        }
+
+        await AuthService.LogoutAsync();
+
+        var relativeUri = Navigation.ToBaseRelativePath(Navigation.Uri);
+        if (!relativeUri.StartsWith("login", StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo("/login", replace: true);
         }
     }
 }

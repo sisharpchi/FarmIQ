@@ -27,6 +27,12 @@ public sealed class Conversation : BaseEntity
     public string ExternalUserId { get; set; } = string.Empty;
     public string? TenantKey { get; set; }
     public DateTime LastMessageUtc { get; set; } = DateTime.UtcNow;
+    public ConversationAssistantState AssistantState { get; set; } = ConversationAssistantState.Idle;
+    public string? AssistantStateJson { get; set; }
+    public InboundIntentType LastDetectedIntent { get; set; } = InboundIntentType.Unknown;
+    public DateTime? LastBotPromptUtc { get; set; }
+    public DateTime? LocationRequestedUtc { get; set; }
+    public DateTime? LastWeatherPromptUtc { get; set; }
     public ICollection<InboundMessage> InboundMessages { get; set; } = new List<InboundMessage>();
     public ICollection<OutboundMessage> OutboundMessages { get; set; } = new List<OutboundMessage>();
 }
@@ -45,6 +51,8 @@ public sealed class InboundMessage : BaseEntity
     public string? NormalizedMetadataJson { get; set; }
     public bool IsDuplicateDelivery { get; set; }
     public bool IsUnsupportedEvent { get; set; }
+    public InboundIntentType DetectedIntent { get; set; } = InboundIntentType.Unknown;
+    public string? IgnoredReason { get; set; }
     public string? DuplicateOfMessageId { get; set; }
     public MessageLifecycleStatus Status { get; set; } = MessageLifecycleStatus.Received;
     public DateTime ReceivedUtc { get; set; } = DateTime.UtcNow;
@@ -79,6 +87,10 @@ public sealed class CropAdvisory : BaseEntity
     public string AdvisoryText { get; set; } = string.Empty;
     public string? FollowUpQuestion { get; set; }
     public string? SafetyDisclaimer { get; set; }
+    public string? ShortReasoningSummary { get; set; }
+    public AdvisoryAnalysisSource AnalysisSource { get; set; } = AdvisoryAnalysisSource.Fallback;
+    public bool NeedsCloserPhoto { get; set; }
+    public bool NeedsLocation { get; set; }
     public AdvisoryDiagnosis Diagnosis { get; set; } = null!;
     public WeatherSnapshot? WeatherSnapshot { get; set; }
 }

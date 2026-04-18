@@ -1,5 +1,6 @@
-using System.Text.Json;
 using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
 using FarmIQ.Application.Abstractions;
 using FarmIQ.Application.Contracts;
 using FarmIQ.Core.Entities;
@@ -9,13 +10,19 @@ using Microsoft.Extensions.Configuration;
 
 namespace FarmIQ.Application.Services;
 
-public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJobQueue backgroundJobQueue) : IMessageIngestionService
+public sealed class MessageIngestionService(
+    IUnitOfWork unitOfWork,
+    IBackgroundJobQueue backgroundJobQueue,
+    IInboundIntentClassifier inboundIntentClassifier,
+    IConversationResponseComposer conversationResponseComposer,
+    IMessageChannelResolver messageChannelResolver) : IMessageIngestionService
 {
     public async Task<InboundAcceptanceResult> AcceptAsync(NormalizedInboundMessageCommand command, CancellationToken cancellationToken = default)
     {
         var farmerRepository = unitOfWork.Repository<FarmerProfile>();
         var conversationRepository = unitOfWork.Repository<Conversation>();
         var inboundRepository = unitOfWork.Repository<InboundMessage>();
+        var outboundRepository = unitOfWork.Repository<OutboundMessage>();
         var jobRepository = unitOfWork.Repository<ProcessingJob>();
         var deliveryRepository = unitOfWork.Repository<WebhookDelivery>();
 
@@ -41,6 +48,7 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
             };
         }
 
+        var now = DateTime.UtcNow;
         var farmer = await farmerRepository.FirstOrDefaultAsync(
             x => x.ExternalFarmerId == command.ExternalUserId,
             cancellationToken);
@@ -63,9 +71,13 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
         {
             farmer.DisplayName = string.IsNullOrWhiteSpace(command.DisplayName) ? farmer.DisplayName : command.DisplayName;
             farmer.PreferredLanguage = command.IncomingLanguage ?? farmer.PreferredLanguage;
-            farmer.Latitude ??= command.Latitude;
-            farmer.Longitude ??= command.Longitude;
-            farmer.UpdatedUtc = DateTime.UtcNow;
+            if (command.HasLocation)
+            {
+                farmer.Latitude = command.Latitude;
+                farmer.Longitude = command.Longitude;
+            }
+
+            farmer.UpdatedUtc = now;
             farmerRepository.Update(farmer);
         }
 
@@ -82,17 +94,22 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
                 ExternalConversationId = command.ExternalConversationId,
                 ExternalUserId = command.ExternalUserId,
                 TenantKey = command.TenantKey,
-                LastMessageUtc = DateTime.UtcNow
+                LastMessageUtc = now,
+                AssistantState = ConversationAssistantState.Idle
             };
 
             await conversationRepository.AddAsync(conversation, cancellationToken);
         }
         else
         {
-            conversation.LastMessageUtc = DateTime.UtcNow;
-            conversation.UpdatedUtc = DateTime.UtcNow;
+            conversation.LastMessageUtc = now;
+            conversation.UpdatedUtc = now;
             conversationRepository.Update(conversation);
         }
+
+        var classification = inboundIntentClassifier.Classify(command, conversation);
+        command.IntentType = classification.IntentType;
+        command.IgnoredReason ??= classification.IgnoredReason;
 
         var inboundMessage = new InboundMessage
         {
@@ -102,7 +119,9 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
             RawPayloadJson = command.OriginalPayloadJson,
             OriginalText = command.Text,
             OriginalLanguage = command.IncomingLanguage,
-            IsUnsupportedEvent = command.IsUnsupportedEvent,
+            IsUnsupportedEvent = command.IsUnsupportedEvent || classification.IntentType == InboundIntentType.Unsupported,
+            DetectedIntent = classification.IntentType,
+            IgnoredReason = command.IgnoredReason,
             Status = MessageLifecycleStatus.Stored,
             NormalizedMetadataJson = JsonSerializer.Serialize(command.Metadata),
             MediaAssets = command.Media.Select(media => new MediaAsset
@@ -118,25 +137,61 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
 
         await inboundRepository.AddAsync(inboundMessage, cancellationToken);
 
+        conversation.LastDetectedIntent = classification.IntentType;
+
         ProcessingJob? processingJob = null;
-        if (!command.IsUnsupportedEvent)
+        OutboundMessage? outbound = null;
+        ComposedConversationResponse? immediateResponse = null;
+
+        if (classification.QueueForAdvisory)
         {
             processingJob = new ProcessingJob
             {
                 InboundMessage = inboundMessage,
                 Status = ProcessingJobStatus.Pending,
                 JobType = "advisory",
-                ScheduledUtc = DateTime.UtcNow,
-                NextAttemptUtc = DateTime.UtcNow
+                ScheduledUtc = now,
+                NextAttemptUtc = now
             };
 
-            await jobRepository.AddAsync(processingJob, cancellationToken);
+            conversation.AssistantState = ConversationAssistantState.AwaitingProblemDetails;
             inboundMessage.Status = MessageLifecycleStatus.Queued;
+            await jobRepository.AddAsync(processingJob, cancellationToken);
+        }
+        else if (classification.SendImmediateResponse)
+        {
+            immediateResponse = await conversationResponseComposer.ComposeImmediateResponseAsync(command, farmer, conversation, cancellationToken);
+            conversation.AssistantState = immediateResponse?.NextState ?? classification.NextState;
+            inboundMessage.Status = immediateResponse is null ? MessageLifecycleStatus.Completed : MessageLifecycleStatus.Stored;
+
+            if (immediateResponse is not null)
+            {
+                command.ImmediateResponseCandidate = immediateResponse.Message;
+                outbound = new OutboundMessage
+                {
+                    Conversation = conversation,
+                    InboundMessage = inboundMessage,
+                    ChannelType = command.ChannelType,
+                    Body = immediateResponse.Message,
+                    DeliveryStatus = OutboundDeliveryStatus.Pending
+                };
+
+                await outboundRepository.AddAsync(outbound, cancellationToken);
+            }
         }
         else
         {
+            conversation.AssistantState = classification.NextState;
             inboundMessage.Status = MessageLifecycleStatus.Completed;
         }
+
+        conversation.AssistantStateJson = BuildAssistantStateJson(
+            conversation.AssistantState,
+            classification.IntentType,
+            farmer,
+            pendingLocation: false,
+            pendingPhoto: immediateResponse?.RequestedPhoto == true,
+            analysisSource: null);
 
         await deliveryRepository.AddAsync(new WebhookDelivery
         {
@@ -150,15 +205,77 @@ public sealed class MessageIngestionService(IUnitOfWork unitOfWork, IBackgroundJ
         }, cancellationToken);
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
+
         if (processingJob is not null)
         {
             await backgroundJobQueue.QueueAsync(processingJob.Id, cancellationToken);
         }
+        else if (outbound is not null && immediateResponse is not null)
+        {
+            var channelService = messageChannelResolver.Resolve(command.ChannelType);
+            var sendResult = await channelService.SendReplyAsync(
+                new ChannelReplyRequest
+                {
+                    ChannelType = command.ChannelType,
+                    ConversationId = conversation.Id,
+                    RecipientId = conversation.ExternalUserId,
+                    Message = immediateResponse.Message,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["intent"] = classification.IntentType.ToString()
+                    }
+                },
+                cancellationToken);
+
+            outbound.ExternalMessageId = sendResult.ExternalMessageId;
+            outbound.DeliveryStatus = sendResult.Success ? OutboundDeliveryStatus.Sent : OutboundDeliveryStatus.Failed;
+            outbound.FailureReason = sendResult.ErrorMessage;
+            outbound.SentUtc = sendResult.Success ? DateTime.UtcNow : null;
+
+            inboundMessage.Status = sendResult.Success ? MessageLifecycleStatus.Replied : MessageLifecycleStatus.Failed;
+            if (sendResult.Success)
+            {
+                conversation.LastBotPromptUtc = DateTime.UtcNow;
+            }
+
+            conversation.AssistantState = immediateResponse.NextState;
+            conversation.AssistantStateJson = BuildAssistantStateJson(
+                conversation.AssistantState,
+                classification.IntentType,
+                farmer,
+                pendingLocation: immediateResponse.RequestedLocation,
+                pendingPhoto: immediateResponse.RequestedPhoto,
+                analysisSource: null);
+
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
 
         return new InboundAcceptanceResult
         {
-            AcceptedMessage = new InboundMessageAcceptedDto(inboundMessage.Id, processingJob?.Id ?? Guid.Empty, inboundMessage.Status)
+            AcceptedMessage = new InboundMessageAcceptedDto(
+                inboundMessage.Id,
+                processingJob?.Id ?? Guid.Empty,
+                inboundMessage.Status)
         };
+    }
+
+    private static string BuildAssistantStateJson(
+        ConversationAssistantState assistantState,
+        InboundIntentType intentType,
+        FarmerProfile farmer,
+        bool pendingLocation,
+        bool pendingPhoto,
+        AdvisoryAnalysisSource? analysisSource)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            assistantState,
+            lastIntent = intentType,
+            locationKnown = farmer.Latitude.HasValue && farmer.Longitude.HasValue,
+            pendingLocation,
+            pendingPhoto,
+            analysisSource
+        });
     }
 }
 
@@ -196,33 +313,40 @@ public sealed class AdvisoryWorkflowService(
         try
         {
             var inbound = job.InboundMessage;
-            var farmer = inbound.Conversation.FarmerProfile;
+            var conversation = inbound.Conversation;
+            var farmer = conversation.FarmerProfile;
 
             var inboundMediaDtos = inbound.MediaAssets.Select(x => new InboundMediaDto
             {
+                ChannelType = inbound.ChannelType,
                 MediaType = x.MediaType,
                 ExternalMediaId = x.ExternalMediaId,
                 Url = x.SourceUrl,
                 FileName = x.FileName,
                 ContentType = x.ContentType,
-                SizeBytes = x.SizeBytes
+                SizeBytes = x.SizeBytes,
+                StoragePath = x.StoragePath,
+                StorageUrl = x.StorageUrl
             }).ToList();
 
             foreach (var media in inbound.MediaAssets.Where(x => !x.IsDownloaded))
             {
-                var stored = await mediaStorageService.SaveRemoteMediaAsync(
-                    inboundMediaDtos.First(x => x.ExternalMediaId == media.ExternalMediaId),
-                    cancellationToken);
+                var dto = inboundMediaDtos.First(x => x.ExternalMediaId == media.ExternalMediaId);
+                var stored = await mediaStorageService.SaveRemoteMediaAsync(dto, cancellationToken);
 
                 media.StoragePath = stored.StoragePath;
                 media.StorageUrl = stored.StorageUrl;
                 media.SizeBytes = stored.SizeBytes;
                 media.IsDownloaded = true;
                 media.UpdatedUtc = DateTime.UtcNow;
+
+                dto.StoragePath = stored.StoragePath;
+                dto.StorageUrl = stored.StorageUrl;
+                dto.SizeBytes = stored.SizeBytes;
             }
 
             var transcribedText = await speechToTextService.TranscribeAsync(
-                inboundMediaDtos.Where(x => x.MediaType == MediaType.Voice || x.MediaType == MediaType.Audio),
+                inboundMediaDtos.Where(x => x.MediaType is MediaType.Voice or MediaType.Audio),
                 cancellationToken);
 
             var combinedText = string.Join(
@@ -241,9 +365,27 @@ public sealed class AdvisoryWorkflowService(
 
             var englishInput = await languageService.TranslateToEnglishAsync(combinedText, sourceLanguage!, cancellationToken);
             var analysis = await cropAnalysisService.AnalyzeAsync(englishInput, inboundMediaDtos, cancellationToken);
-            var weather = await weatherService.GetSummaryAsync(farmer.Latitude, farmer.Longitude, cancellationToken);
-            var responseLanguage = farmer.PreferredLanguage;
-            var advisoryText = BuildAdvisoryText(analysis, weather);
+            analysis.NeedsLocation |= !farmer.Latitude.HasValue || !farmer.Longitude.HasValue;
+
+            if (analysis.ConfidenceScore < 0.70m && string.IsNullOrWhiteSpace(analysis.FollowUpQuestion))
+            {
+                analysis.FollowUpQuestion = "Send one closer photo of the affected leaves and stem base.";
+            }
+
+            if (analysis.ConfidenceScore < 0.70m && !inboundMediaDtos.Any(x => x.MediaType == MediaType.Image))
+            {
+                analysis.NeedsCloserPhoto = true;
+            }
+
+            var weather = farmer.Latitude.HasValue && farmer.Longitude.HasValue
+                ? await weatherService.GetSummaryAsync(farmer.Latitude, farmer.Longitude, cancellationToken)
+                : new WeatherSummaryDto();
+
+            var responseLanguage = string.IsNullOrWhiteSpace(farmer.PreferredLanguage)
+                ? sourceLanguage ?? "en"
+                : farmer.PreferredLanguage;
+
+            var advisoryText = BuildAdvisoryText(analysis, weather, farmer.Latitude.HasValue && farmer.Longitude.HasValue);
             var localizedAdvisory = await languageService.TranslateFromEnglishAsync(advisoryText, responseLanguage, cancellationToken);
 
             inbound.TranscribedText = transcribedText;
@@ -257,6 +399,10 @@ public sealed class AdvisoryWorkflowService(
                 AdvisoryText = localizedAdvisory,
                 FollowUpQuestion = analysis.FollowUpQuestion,
                 SafetyDisclaimer = analysis.SafetyDisclaimer,
+                ShortReasoningSummary = analysis.ShortReasoningSummary,
+                AnalysisSource = analysis.AnalysisSource,
+                NeedsCloserPhoto = analysis.NeedsCloserPhoto,
+                NeedsLocation = analysis.NeedsLocation,
                 Status = AdvisoryStatus.Ready,
                 Diagnosis = new AdvisoryDiagnosis
                 {
@@ -290,6 +436,8 @@ public sealed class AdvisoryWorkflowService(
             await unitOfWork.Repository<OutboundMessage>().AddAsync(outbound, cancellationToken);
             await unitOfWork.SaveChangesAsync(cancellationToken);
 
+            var nextAssistantState = DetermineNextAssistantState(analysis, farmer.Latitude.HasValue && farmer.Longitude.HasValue);
+
             var channelService = messageChannelResolver.Resolve(inbound.ChannelType);
             var sendResult = await channelService.SendReplyAsync(
                 new ChannelReplyRequest
@@ -301,7 +449,8 @@ public sealed class AdvisoryWorkflowService(
                     Metadata = new Dictionary<string, string>
                     {
                         ["advisoryId"] = advisory.Id.ToString(),
-                        ["confidence"] = analysis.ConfidenceScore.ToString("0.00")
+                        ["confidence"] = analysis.ConfidenceScore.ToString("0.00"),
+                        ["analysisSource"] = analysis.AnalysisSource.ToString()
                     }
                 },
                 cancellationToken);
@@ -313,6 +462,25 @@ public sealed class AdvisoryWorkflowService(
 
             advisory.Status = sendResult.Success ? AdvisoryStatus.Sent : AdvisoryStatus.Failed;
             inbound.Status = sendResult.Success ? MessageLifecycleStatus.Replied : MessageLifecycleStatus.Failed;
+            conversation.AssistantState = nextAssistantState;
+            conversation.AssistantStateJson = BuildAssistantStateJson(
+                conversation.AssistantState,
+                inbound.DetectedIntent,
+                farmer,
+                pendingLocation: analysis.NeedsLocation && (!farmer.Latitude.HasValue || !farmer.Longitude.HasValue),
+                pendingPhoto: analysis.NeedsCloserPhoto,
+                analysisSource: analysis.AnalysisSource);
+
+            if (sendResult.Success)
+            {
+                conversation.LastBotPromptUtc = DateTime.UtcNow;
+                if (nextAssistantState == ConversationAssistantState.AwaitingLocation)
+                {
+                    conversation.LocationRequestedUtc = DateTime.UtcNow;
+                    conversation.LastWeatherPromptUtc = DateTime.UtcNow;
+                }
+            }
+
             job.LeaseExpiresUtc = null;
             job.LeaseOwner = null;
             job.LeaseToken = null;
@@ -353,14 +521,124 @@ public sealed class AdvisoryWorkflowService(
         }
     }
 
-    private static string BuildAdvisoryText(CropAnalysisResult analysis, WeatherSummaryDto weather)
+    private static ConversationAssistantState DetermineNextAssistantState(CropAnalysisResult analysis, bool locationKnown)
     {
-        var confidenceLabel = analysis.ConfidenceScore >= 0.75m ? "high" : "moderate";
-        return
-            $"Diagnosis: {analysis.DiseaseName}. Confidence: {confidenceLabel} ({analysis.ConfidenceScore:P0}). " +
-            $"Treatment: {analysis.TreatmentRecommendation}. Harvest timing: {analysis.HarvestTiming}. " +
-            $"Weather: {weather.Summary}. Crop impact: {weather.CropImpact}. " +
-            $"{analysis.SafetyDisclaimer}".Trim();
+        if (analysis.NeedsCloserPhoto)
+        {
+            return ConversationAssistantState.AwaitingPhoto;
+        }
+
+        if (analysis.NeedsLocation && !locationKnown)
+        {
+            return ConversationAssistantState.AwaitingLocation;
+        }
+
+        return ConversationAssistantState.AdvisorySent;
+    }
+
+    private static string BuildAdvisoryText(CropAnalysisResult analysis, WeatherSummaryDto weather, bool locationKnown)
+    {
+        var confidenceLabel = analysis.ConfidenceScore >= 0.85m
+            ? "High"
+            : analysis.ConfidenceScore >= 0.70m
+                ? "Moderate"
+                : "Low";
+
+        var lines = new List<string>();
+
+        if (analysis.ConfidenceScore < 0.70m && !string.IsNullOrWhiteSpace(analysis.FollowUpQuestion))
+        {
+            lines.Add("I need one more detail before I can be fully confident.");
+        }
+
+        lines.Add($"Possible issue: {analysis.DiseaseName}");
+        lines.Add($"Confidence: {confidenceLabel} ({analysis.ConfidenceScore:P0})");
+        lines.Add($"What to do now: {analysis.TreatmentRecommendation}");
+        lines.Add($"Harvest note: {analysis.HarvestTiming}");
+
+        if (ShouldIncludeWeather(weather))
+        {
+            lines.Add($"Weather: {weather.Summary}");
+            if (!string.IsNullOrWhiteSpace(weather.CropImpact))
+            {
+                lines.Add($"Crop impact: {weather.CropImpact}");
+            }
+        }
+
+        var nextThing = BuildNextThingToSend(analysis, locationKnown);
+        if (!string.IsNullOrWhiteSpace(nextThing))
+        {
+            lines.Add($"Next thing to send: {nextThing}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(analysis.ShortReasoningSummary))
+        {
+            lines.Add($"Why this looks likely: {analysis.ShortReasoningSummary}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(analysis.SafetyDisclaimer))
+        {
+            lines.Add($"Safety: {analysis.SafetyDisclaimer}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static bool ShouldIncludeWeather(WeatherSummaryDto weather)
+    {
+        if (string.IsNullOrWhiteSpace(weather.Summary))
+        {
+            return false;
+        }
+
+        return !weather.Summary.Contains("not configured", StringComparison.OrdinalIgnoreCase) &&
+               !weather.Summary.Contains("unavailable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? BuildNextThingToSend(CropAnalysisResult analysis, bool locationKnown)
+    {
+        var requests = new List<string>();
+
+        if (analysis.NeedsCloserPhoto)
+        {
+            requests.Add("a closer photo of the affected leaves and stem base");
+        }
+
+        if (analysis.NeedsLocation && !locationKnown)
+        {
+            requests.Add("your location for rain and spray timing");
+        }
+
+        if (requests.Count == 0 && !string.IsNullOrWhiteSpace(analysis.FollowUpQuestion))
+        {
+            requests.Add(analysis.FollowUpQuestion.TrimEnd('.'));
+        }
+
+        return requests.Count switch
+        {
+            0 => null,
+            1 => requests[0],
+            _ => string.Join(" and ", requests)
+        };
+    }
+
+    private static string BuildAssistantStateJson(
+        ConversationAssistantState assistantState,
+        InboundIntentType intentType,
+        FarmerProfile farmer,
+        bool pendingLocation,
+        bool pendingPhoto,
+        AdvisoryAnalysisSource analysisSource)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            assistantState,
+            lastIntent = intentType,
+            locationKnown = farmer.Latitude.HasValue && farmer.Longitude.HasValue,
+            pendingLocation,
+            pendingPhoto,
+            analysisSource
+        });
     }
 }
 
@@ -383,7 +661,10 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
                 x.ChannelType,
                 x.LastMessageUtc,
                 x.InboundMessages.Count,
-                x.OutboundMessages.Count))
+                x.OutboundMessages.Count,
+                x.LastDetectedIntent,
+                x.AssistantState,
+                x.FarmerProfile.Latitude != null && x.FarmerProfile.Longitude != null))
             .ToListAsync(cancellationToken);
 
         return new PagedResponse<ConversationSummaryDto>(items, totalCount, page, pageSize);
@@ -406,7 +687,11 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
                 x.Status,
                 x.Attempts,
                 x.LastError,
-                x.ScheduledUtc))
+                x.ScheduledUtc,
+                x.NextAttemptUtc,
+                x.LeaseExpiresUtc,
+                x.IsTerminalFailure,
+                x.DeadLetterReason))
             .ToListAsync(cancellationToken);
 
         return new PagedResponse<ProcessingJobSummaryDto>(items, totalCount, page, pageSize);
@@ -425,7 +710,10 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
                 x.Diagnosis.DiseaseName,
                 x.Diagnosis.ConfidenceScore,
                 x.AdvisoryLanguage,
-                x.AdvisoryText))
+                x.AdvisoryText,
+                x.AnalysisSource,
+                x.NeedsLocation,
+                x.NeedsCloserPhoto))
             .ToListAsync(cancellationToken);
 
         return new PagedResponse<AdvisorySummaryDto>(items, totalCount, page, pageSize);
@@ -445,8 +733,24 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
         }
 
         var messages = conversation.InboundMessages
-            .Select(x => new ConversationMessageDto(x.Id, "Inbound", x.OriginalText ?? x.TranscribedText, x.Status, null, x.CreatedUtc))
-            .Concat(conversation.OutboundMessages.Select(x => new ConversationMessageDto(x.Id, "Outbound", x.Body, null, x.DeliveryStatus, x.CreatedUtc)))
+            .Select(x => new ConversationMessageDto(
+                x.Id,
+                "Inbound",
+                x.OriginalText ?? x.TranscribedText ?? (x.DetectedIntent == InboundIntentType.LocationShare ? "Location shared" : null),
+                x.Status,
+                null,
+                x.CreatedUtc,
+                x.DetectedIntent,
+                x.IgnoredReason))
+            .Concat(conversation.OutboundMessages.Select(x => new ConversationMessageDto(
+                x.Id,
+                "Outbound",
+                x.Body,
+                null,
+                x.DeliveryStatus,
+                x.CreatedUtc,
+                null,
+                null)))
             .OrderBy(x => x.CreatedUtc)
             .ToList();
 
@@ -456,6 +760,11 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             conversation.ExternalUserId,
             conversation.ChannelType,
             conversation.LastMessageUtc,
+            conversation.AssistantState,
+            conversation.LastDetectedIntent,
+            conversation.FarmerProfile.Latitude != null && conversation.FarmerProfile.Longitude != null,
+            conversation.LastBotPromptUtc,
+            conversation.LocationRequestedUtc,
             messages);
     }
 
@@ -481,7 +790,12 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             advisory.AdvisoryText,
             advisory.SafetyDisclaimer,
             advisory.WeatherSnapshot?.Summary,
-            advisory.WeatherSnapshot?.CropImpact);
+            advisory.WeatherSnapshot?.CropImpact,
+            advisory.AnalysisSource,
+            advisory.NeedsLocation,
+            advisory.NeedsCloserPhoto,
+            advisory.FollowUpQuestion,
+            advisory.ShortReasoningSummary);
     }
 
     public async Task<PagedResponse<DeliveryIssueSummaryDto>> GetDeliveryIssuesAsync(int page, int pageSize, CancellationToken cancellationToken = default)
@@ -525,13 +839,23 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             FailedJobs = await unitOfWork.Repository<ProcessingJob>().Query().CountAsync(x => x.Status == ProcessingJobStatus.Failed, cancellationToken),
             CompletedAdvisories = await unitOfWork.Repository<CropAdvisory>().Query().CountAsync(x => x.Status == AdvisoryStatus.Sent || x.Status == AdvisoryStatus.Ready, cancellationToken),
             DuplicateDeliveries = await unitOfWork.Repository<WebhookDelivery>().Query().CountAsync(x => x.IsDuplicate, cancellationToken),
-            StuckJobs = await unitOfWork.Repository<ProcessingJob>().Query().CountAsync(x => x.Status == ProcessingJobStatus.InProgress && x.LeaseExpiresUtc != null && x.LeaseExpiresUtc < now, cancellationToken)
+            StuckJobs = await unitOfWork.Repository<ProcessingJob>().Query().CountAsync(x => x.Status == ProcessingJobStatus.InProgress && x.LeaseExpiresUtc != null && x.LeaseExpiresUtc < now, cancellationToken),
+            CommandMessages = await unitOfWork.Repository<InboundMessage>().Query().CountAsync(x => x.DetectedIntent == InboundIntentType.StartCommand || x.DetectedIntent == InboundIntentType.HelpCommand, cancellationToken),
+            GreetingMessages = await unitOfWork.Repository<InboundMessage>().Query().CountAsync(x => x.DetectedIntent == InboundIntentType.Greeting || x.DetectedIntent == InboundIntentType.SmallTalk, cancellationToken),
+            FollowUpResponses = await unitOfWork.Repository<CropAdvisory>().Query().CountAsync(x => x.NeedsCloserPhoto || x.NeedsLocation || x.FollowUpQuestion != null, cancellationToken),
+            OpenAiFallbacks = await unitOfWork.Repository<CropAdvisory>().Query().CountAsync(x => x.AnalysisSource == AdvisoryAnalysisSource.Fallback, cancellationToken)
         };
     }
 
     public Task<AdminSystemStatusDto> GetSystemStatusAsync(CancellationToken cancellationToken = default)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection");
+        var publicSignupEnabled = bool.TryParse(configuration["Auth:EnablePublicSignup"], out var signupEnabled) && signupEnabled;
+        var workerPollIntervalSeconds = int.TryParse(configuration["Processing:PollIntervalSeconds"], out var pollIntervalSeconds)
+            ? pollIntervalSeconds
+            : 30;
+        var openAiEnabled = bool.TryParse(configuration["OpenAI:Enabled"], out var enabled) && enabled;
+        var openAiConfigured = openAiEnabled && !string.IsNullOrWhiteSpace(configuration["OpenAI:ApiKey"]);
         return Task.FromResult(new AdminSystemStatusDto(
             ApiHealthy: true,
             DatabaseConfigured: !string.IsNullOrWhiteSpace(connectionString),
@@ -540,6 +864,9 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             WhatsAppConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:WhatsAppBaseUrl"]),
             TelegramConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:TelegramBaseUrl"]),
             InstagramConfigured: !string.IsNullOrWhiteSpace(configuration["ChannelApis:InstagramBaseUrl"]),
+            PublicSignupEnabled: publicSignupEnabled,
+            WorkerPollIntervalSeconds: workerPollIntervalSeconds,
+            OpenAiConfigured: openAiConfigured,
             ServerUtc: DateTime.UtcNow));
     }
 
@@ -584,7 +911,9 @@ public sealed class ProcessingJobLeaseService(IUnitOfWork unitOfWork, IProcessin
         var job = await repository.Query()
             .Include(x => x.InboundMessage)
             .Where(x =>
-                (x.Status == ProcessingJobStatus.Pending || x.Status == ProcessingJobStatus.Retrying || (x.Status == ProcessingJobStatus.InProgress && x.LeaseExpiresUtc < now)) &&
+                (x.Status == ProcessingJobStatus.Pending ||
+                 x.Status == ProcessingJobStatus.Retrying ||
+                 (x.Status == ProcessingJobStatus.InProgress && x.LeaseExpiresUtc < now)) &&
                 !x.IsTerminalFailure &&
                 (x.NextAttemptUtc == null || x.NextAttemptUtc <= now))
             .OrderBy(x => x.NextAttemptUtc ?? x.ScheduledUtc)

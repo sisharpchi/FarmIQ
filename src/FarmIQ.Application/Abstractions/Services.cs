@@ -72,6 +72,20 @@ public interface IMessageIngestionService
     Task<InboundAcceptanceResult> AcceptAsync(NormalizedInboundMessageCommand command, CancellationToken cancellationToken = default);
 }
 
+public interface IInboundIntentClassifier
+{
+    IntentClassificationResult Classify(NormalizedInboundMessageCommand command, Conversation? conversation);
+}
+
+public interface IConversationResponseComposer
+{
+    Task<ComposedConversationResponse?> ComposeImmediateResponseAsync(
+        NormalizedInboundMessageCommand command,
+        FarmerProfile farmer,
+        Conversation conversation,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IAdvisoryWorkflowService
 {
     Task ProcessAsync(Guid processingJobId, CancellationToken cancellationToken = default);
@@ -101,4 +115,14 @@ public interface IAdminQueryService
     Task<AdminSystemStatusDto> GetSystemStatusAsync(CancellationToken cancellationToken = default);
     Task<AdminSessionDto> GetSessionAsync(System.Security.Claims.ClaimsPrincipal user);
     Task RetryJobAsync(Guid processingJobId, CancellationToken cancellationToken = default);
+}
+
+public interface IAdminUserManagementService
+{
+    Task<PagedResponse<AdminUserSummaryDto>> GetUsersAsync(int page, int pageSize, CancellationToken cancellationToken = default);
+    Task<AdminUserSummaryDto> CreateUserAsync(AdminCreateUserRequest request, string actor, string? correlationId, CancellationToken cancellationToken = default);
+    Task<AdminUserSummaryDto> DisableUserAsync(Guid userId, string actor, string? correlationId, CancellationToken cancellationToken = default);
+    Task<AdminUserSummaryDto> EnableUserAsync(Guid userId, string actor, string? correlationId, CancellationToken cancellationToken = default);
+    Task<AdminUserSummaryDto> ResetPasswordAsync(Guid userId, AdminResetPasswordRequest request, string actor, string? correlationId, CancellationToken cancellationToken = default);
+    Task<AdminUserSummaryDto> UpdateRolesAsync(Guid userId, AdminUpdateUserRolesRequest request, string actor, string? correlationId, CancellationToken cancellationToken = default);
 }

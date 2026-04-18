@@ -1,17 +1,77 @@
+@inject FarmAuthStateProvider AuthStateProvider
+
 <CascadingAuthenticationState>
-    <Router AppAssembly="typeof(Program).Assembly">
-        <Found Context="routeData">
-            <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
-                <NotAuthorized>
-                    <RedirectToLogin />
-                </NotAuthorized>
-            </AuthorizeRouteView>
-            <FocusOnNavigate RouteData="routeData" Selector="h1" />
-        </Found>
-        <NotFound>
-            <LayoutView Layout="typeof(Layout.MainLayout)">
-                <p class="empty-state">Nothing matched that route.</p>
-            </LayoutView>
-        </NotFound>
-    </Router>
+    <AuthBootstrap />
+
+    @if (!AuthStateProvider.IsInitialized)
+    {
+        <LayoutView Layout="typeof(EmptyLayout)">
+            <div class="login-shell">
+                <div class="login-panel">
+                    <div class="login-kicker">FarmIQ Admin</div>
+                    <h1>Restoring your operations session</h1>
+                    <p class="login-copy">Loading the control center and validating the local admin session.</p>
+                </div>
+            </div>
+        </LayoutView>
+    }
+    else
+    {
+        <Router AppAssembly="typeof(Program).Assembly">
+            <Found Context="routeData">
+                @if (IsPublic(routeData.PageType))
+                {
+                    <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+                }
+                else if (AuthStateProvider.CurrentSession is null)
+                {
+                    <LayoutView Layout="typeof(EmptyLayout)">
+                        <RedirectToLogin />
+                    </LayoutView>
+                }
+                else if (!HasRequiredRole(routeData.PageType))
+                {
+                    <LayoutView Layout="typeof(Layout.MainLayout)">
+                        <div class="panel-card">
+                            <h1>Access denied</h1>
+                            <p class="subtle-copy">Your current FarmIQ role does not allow access to this area.</p>
+                        </div>
+                    </LayoutView>
+                }
+                else
+                {
+                    <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+                }
+
+                <FocusOnNavigate RouteData="routeData" Selector="h1" />
+            </Found>
+            <NotFound>
+                <LayoutView Layout="typeof(Layout.MainLayout)">
+                    <p class="empty-state">Nothing matched that route.</p>
+                </LayoutView>
+            </NotFound>
+        </Router>
+    }
 </CascadingAuthenticationState>
+
+@code {
+    private static bool IsPublic(Type pageType) =>
+        Attribute.IsDefined(pageType, typeof(PublicPageAttribute), inherit: true);
+
+    private bool HasRequiredRole(Type pageType)
+    {
+        var access = pageType
+            .GetCustomAttributes(typeof(RouteAccessAttribute), inherit: true)
+            .OfType<RouteAccessAttribute>()
+            .FirstOrDefault();
+
+        if (access is null || access.Roles.Count == 0)
+        {
+            return true;
+        }
+
+        var roles = AuthStateProvider.CurrentSession?.User.Roles ?? Array.Empty<string>();
+        return access.Roles.Any(requiredRole =>
+            roles.Contains(requiredRole, StringComparer.OrdinalIgnoreCase));
+    }
+}

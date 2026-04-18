@@ -1,6 +1,6 @@
 @page "/"
 @page "/dashboard"
-@attribute [Authorize]
+@attribute [RouteAccess]
 @implements IDisposable
 @inject FarmAdminApiClient ApiClient
 @inject RefreshCoordinator RefreshCoordinator
@@ -20,6 +20,10 @@
         <div class="metric-card"><span>Duplicate deliveries</span><strong>@_analytics.DuplicateDeliveries</strong></div>
         <div class="metric-card"><span>Completed advisories</span><strong>@_analytics.CompletedAdvisories</strong></div>
         <div class="metric-card"><span>Stuck jobs</span><strong>@_analytics.StuckJobs</strong></div>
+        <div class="metric-card"><span>Command messages</span><strong>@_analytics.CommandMessages</strong></div>
+        <div class="metric-card"><span>Greetings / vague</span><strong>@_analytics.GreetingMessages</strong></div>
+        <div class="metric-card"><span>Follow-up advisories</span><strong>@_analytics.FollowUpResponses</strong></div>
+        <div class="metric-card"><span>Fallback analyses</span><strong>@_analytics.OpenAiFallbacks</strong></div>
     </div>
 
     <div class="page-grid">
@@ -33,6 +37,7 @@
                 <div class="@StatusClass(_status.WhatsAppConfigured)">WhatsApp configured</div>
                 <div class="@StatusClass(_status.TelegramConfigured)">Telegram configured</div>
                 <div class="@StatusClass(_status.InstagramConfigured)">Instagram configured</div>
+                <div class="@StatusClass(_status.OpenAiConfigured)">OpenAI configured</div>
             </div>
         </section>
 
@@ -42,6 +47,7 @@
                 <li>@_analytics.FailedJobs failed jobs need attention.</li>
                 <li>@_analytics.StuckJobs stuck jobs are waiting for intervention.</li>
                 <li>@_analytics.DuplicateDeliveries duplicate webhook deliveries were recorded.</li>
+                <li>@_analytics.OpenAiFallbacks advisories used fallback analysis instead of OpenAI.</li>
                 <li>Server time: @_status.ServerUtc.ToLocalTime().ToString("g")</li>
                 @if (_lastUpdatedUtc.HasValue)
                 {
@@ -77,11 +83,11 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
-        _pollingHandle = RefreshCoordinator.StartPolling(async () =>
+        _pollingHandle = RefreshCoordinator.StartPolling(RefreshArea.Dashboard, async () =>
         {
             await LoadAsync();
             await InvokeAsync(StateHasChanged);
-        }, TimeSpan.FromSeconds(15));
+        });
     }
 
     private async Task LoadAsync()

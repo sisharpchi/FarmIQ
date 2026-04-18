@@ -1,6 +1,9 @@
 @page "/login"
-@attribute [AllowAnonymous]
+@attribute [PublicPage]
+@layout EmptyLayout
 @inject IAuthService AuthService
+@inject FarmAuthStateProvider AuthStateProvider
+@inject IConfiguration Configuration
 @inject NavigationManager Navigation
 
 <PageTitle>Login | FarmIQ Admin</PageTitle>
@@ -34,10 +37,19 @@
             </button>
         </EditForm>
 
-        <div class="auth-switch-copy">
-            Need an account?
-            <a href="/signup">Create one here</a>
-        </div>
+        @if (PublicSignupEnabled)
+        {
+            <div class="auth-switch-copy">
+                Need an account?
+                <a href="/signup">Create one here</a>
+            </div>
+        }
+        else
+        {
+            <div class="auth-switch-copy">
+                Invite-only access is enabled. Ask an existing admin to provision your account.
+            </div>
+        }
     </div>
 </div>
 
@@ -45,14 +57,19 @@
     private readonly LoginRequestModel _model = new();
     private string? _error;
     private bool _isSubmitting;
+    private bool _redirected;
 
-    protected override async Task OnInitializedAsync()
+    private bool PublicSignupEnabled => Configuration.GetValue<bool>("Features:EnablePublicSignup");
+
+    protected override void OnAfterRender(bool firstRender)
     {
-        var session = await AuthService.GetSessionAsync();
-        if (session is not null)
+        if (_redirected || !AuthStateProvider.IsInitialized || AuthStateProvider.CurrentSession is null)
         {
-            Navigation.NavigateTo("/dashboard", true);
+            return;
         }
+
+        _redirected = true;
+        Navigation.NavigateTo("/dashboard", replace: true);
     }
 
     private async Task HandleLoginAsync()
@@ -68,6 +85,6 @@
             return;
         }
 
-        Navigation.NavigateTo("/dashboard", true);
+        Navigation.NavigateTo("/dashboard", replace: true);
     }
 }

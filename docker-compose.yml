@@ -1,0 +1,107 @@
+services:
+  farmiq-postgres:
+    image: postgres:16-alpine
+    container_name: farmiq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-farmiq}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-farmiq}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  farmiq-api:
+    build:
+      context: .
+      dockerfile: src/FarmIQ.API/Dockerfile
+    container_name: farmiq-api
+    restart: unless-stopped
+    depends_on:
+      farmiq-postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: Host=farmiq-postgres;Port=5432;Database=${POSTGRES_DB:-farmiq};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD}
+      Storage__RootPath: /data/media
+      Storage__PublicBaseUrl: /media
+      SeedAdmin__Email: ${SEED_ADMIN_EMAIL:-admin@farmiq.local}
+      SeedAdmin__Password: ${SEED_ADMIN_PASSWORD:-FarmIQ!123}
+      SeedAdmin__DisplayName: ${SEED_ADMIN_DISPLAY_NAME:-FarmIQ Admin}
+      OpenWeatherMap__ApiKey: ${OPENWEATHER_API_KEY:-}
+      OpenWeatherMap__BaseUrl: ${OPENWEATHER_BASE_URL:-https://api.openweathermap.org/data/2.5}
+      Webhooks__WhatsAppVerifyToken: ${WHATSAPP_VERIFY_TOKEN:?Set WHATSAPP_VERIFY_TOKEN in .env}
+      Webhooks__InstagramVerifyToken: ${INSTAGRAM_VERIFY_TOKEN:?Set INSTAGRAM_VERIFY_TOKEN in .env}
+      Webhooks__TelegramSecretToken: ${TELEGRAM_SECRET_TOKEN:?Set TELEGRAM_SECRET_TOKEN in .env}
+      Webhooks__WhatsAppAppSecret: ${WHATSAPP_APP_SECRET:-}
+      Webhooks__InstagramAppSecret: ${INSTAGRAM_APP_SECRET:-}
+      ChannelApis__WhatsAppBaseUrl: ${WHATSAPP_BASE_URL:-https://graph.facebook.com/v19.0}
+      ChannelApis__WhatsAppAccessToken: ${WHATSAPP_ACCESS_TOKEN:-}
+      ChannelApis__WhatsAppPhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      ChannelApis__TelegramBaseUrl: ${TELEGRAM_BASE_URL:-https://api.telegram.org}
+      ChannelApis__TelegramBotToken: ${TELEGRAM_BOT_TOKEN:-}
+      ChannelApis__InstagramBaseUrl: ${INSTAGRAM_BASE_URL:-https://graph.facebook.com/v19.0}
+      ChannelApis__InstagramAccessToken: ${INSTAGRAM_ACCESS_TOKEN:-}
+      ChannelApis__InstagramPageId: ${INSTAGRAM_PAGE_ID:-}
+      Processing__PollIntervalSeconds: ${PROCESSING_POLL_INTERVAL_SECONDS:-30}
+      Processing__LeaseDurationMinutes: ${PROCESSING_LEASE_DURATION_MINUTES:-5}
+      Auth__EnablePublicSignup: ${AUTH_ENABLE_PUBLIC_SIGNUP:-false}
+      Auth__AccessTokenLifetimeMinutes: ${AUTH_ACCESS_TOKEN_LIFETIME_MINUTES:-60}
+    volumes:
+      - farmiq-media:/data/media
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  farmiq-admin:
+    build:
+      context: .
+      dockerfile: src/FarmIQ.Admin/Dockerfile
+    container_name: farmiq-admin
+    restart: unless-stopped
+    depends_on:
+      farmiq-api:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Api__BaseUrl: http://farmiq-api:8080
+      Features__EnablePublicSignup: ${AUTH_ENABLE_PUBLIC_SIGNUP:-false}
+      Polling__DashboardSeconds: ${ADMIN_DASHBOARD_POLL_SECONDS:-15}
+      Polling__JobsSeconds: ${ADMIN_JOBS_POLL_SECONDS:-10}
+      Polling__DeliveriesSeconds: ${ADMIN_DELIVERIES_POLL_SECONDS:-12}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/login >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  farmiq-nginx:
+    image: nginx:1.27-alpine
+    container_name: farmiq-nginx
+    restart: unless-stopped
+    depends_on:
+      farmiq-admin:
+        condition: service_healthy
+      farmiq-api:
+        condition: service_healthy
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  farmiq-media:

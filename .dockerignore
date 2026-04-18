@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.codex-build/
+.git/
+.github/
+README.md
+*.user
+*.suo
+*.db
+*.db-shm
+*.db-wal
+node_modules/
+.env

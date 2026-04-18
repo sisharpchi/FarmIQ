@@ -38,6 +38,9 @@ public sealed class FarmIQDbContext(DbContextOptions<FarmIQDbContext> options)
         {
             entity.HasIndex(x => new { x.ChannelType, x.ExternalConversationId }).IsUnique();
             entity.Property(x => x.ChannelType).HasConversion<int>();
+            entity.Property(x => x.AssistantState).HasConversion<int>();
+            entity.Property(x => x.LastDetectedIntent).HasConversion<int>();
+            entity.Property(x => x.AssistantStateJson).HasColumnType("text");
         });
 
         builder.Entity<InboundMessage>(entity =>
@@ -45,9 +48,11 @@ public sealed class FarmIQDbContext(DbContextOptions<FarmIQDbContext> options)
             entity.HasIndex(x => new { x.ChannelType, x.ExternalMessageId }).IsUnique();
             entity.Property(x => x.ChannelType).HasConversion<int>();
             entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.DetectedIntent).HasConversion<int>();
             entity.Property(x => x.RawPayloadJson).HasColumnType("text");
             entity.Property(x => x.NormalizedMetadataJson).HasColumnType("text");
             entity.Property(x => x.DuplicateOfMessageId).HasMaxLength(128);
+            entity.Property(x => x.IgnoredReason).HasMaxLength(256);
         });
 
         builder.Entity<MediaAsset>(entity =>
@@ -59,6 +64,7 @@ public sealed class FarmIQDbContext(DbContextOptions<FarmIQDbContext> options)
         builder.Entity<CropAdvisory>(entity =>
         {
             entity.Property(x => x.Status).HasConversion<int>();
+            entity.Property(x => x.AnalysisSource).HasConversion<int>();
             entity.HasOne(x => x.Diagnosis)
                 .WithOne(x => x.CropAdvisory)
                 .HasForeignKey<AdvisoryDiagnosis>(x => x.CropAdvisoryId)

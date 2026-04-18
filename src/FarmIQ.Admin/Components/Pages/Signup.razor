@@ -1,6 +1,9 @@
 @page "/signup"
-@attribute [AllowAnonymous]
+@attribute [PublicPage]
+@layout EmptyLayout
 @inject IAuthService AuthService
+@inject FarmAuthStateProvider AuthStateProvider
+@inject IConfiguration Configuration
 @inject NavigationManager Navigation
 
 <PageTitle>Sign Up | FarmIQ Admin</PageTitle>
@@ -8,42 +11,53 @@
 <div class="login-shell">
     <div class="login-panel">
         <div class="login-kicker">FarmIQ Admin</div>
-        <h1>Create your operations account</h1>
-        <p class="login-copy">Set up a FarmIQ admin account for analytics review, advisory quality checks, and daily operations.</p>
+        <h1>@(PublicSignupEnabled ? "Create your operations account" : "Invite-only access is active")</h1>
+        <p class="login-copy">
+            @(PublicSignupEnabled
+                ? "Set up a FarmIQ admin account for analytics review, advisory quality checks, and daily operations."
+                : "Public signup is disabled in this environment. Ask an existing admin to create your account from the Users area.")
+        </p>
 
-        <EditForm Model="_model" OnValidSubmit="HandleSignupAsync">
-            <DataAnnotationsValidator />
-            <ValidationSummary />
+        @if (PublicSignupEnabled)
+        {
+            <EditForm Model="_model" OnValidSubmit="HandleSignupAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
 
-            <div class="form-field">
-                <label>Display name</label>
-                <InputText class="form-control" @bind-Value="_model.DisplayName" />
-            </div>
+                <div class="form-field">
+                    <label>Display name</label>
+                    <InputText class="form-control" @bind-Value="_model.DisplayName" />
+                </div>
 
-            <div class="form-field">
-                <label>Email</label>
-                <InputText class="form-control" @bind-Value="_model.Email" />
-            </div>
+                <div class="form-field">
+                    <label>Email</label>
+                    <InputText class="form-control" @bind-Value="_model.Email" />
+                </div>
 
-            <div class="form-field">
-                <label>Password</label>
-                <InputText class="form-control" type="password" @bind-Value="_model.Password" />
-            </div>
+                <div class="form-field">
+                    <label>Password</label>
+                    <InputText class="form-control" type="password" @bind-Value="_model.Password" />
+                </div>
 
-            <div class="form-field">
-                <label>Confirm password</label>
-                <InputText class="form-control" type="password" @bind-Value="_model.ConfirmPassword" />
-            </div>
+                <div class="form-field">
+                    <label>Confirm password</label>
+                    <InputText class="form-control" type="password" @bind-Value="_model.ConfirmPassword" />
+                </div>
 
-            @if (!string.IsNullOrWhiteSpace(_error))
-            {
-                <div class="alert alert-danger">@_error</div>
-            }
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <div class="alert alert-danger">@_error</div>
+                }
 
-            <button class="btn btn-success login-button" type="submit" disabled="@_isSubmitting">
-                @(_isSubmitting ? "Creating account..." : "Create account")
-            </button>
-        </EditForm>
+                <button class="btn btn-success login-button" type="submit" disabled="@_isSubmitting">
+                    @(_isSubmitting ? "Creating account..." : "Create account")
+                </button>
+            </EditForm>
+        }
+        else
+        {
+            <div class="alert alert-warning">This deployment accepts new users through the internal Admin Users screen only.</div>
+        }
 
         <div class="auth-switch-copy">
             Already have an account?
@@ -56,18 +70,29 @@
     private readonly SignupRequestModel _model = new();
     private string? _error;
     private bool _isSubmitting;
+    private bool _redirected;
 
-    protected override async Task OnInitializedAsync()
+    private bool PublicSignupEnabled => Configuration.GetValue<bool>("Features:EnablePublicSignup");
+
+    protected override void OnAfterRender(bool firstRender)
     {
-        var session = await AuthService.GetSessionAsync();
-        if (session is not null)
+        if (_redirected || !AuthStateProvider.IsInitialized || AuthStateProvider.CurrentSession is null)
         {
-            Navigation.NavigateTo("/dashboard", true);
+            return;
         }
+
+        _redirected = true;
+        Navigation.NavigateTo("/dashboard", replace: true);
     }
 
     private async Task HandleSignupAsync()
     {
+        if (!PublicSignupEnabled)
+        {
+            _error = "Public signup is disabled in this environment.";
+            return;
+        }
+
         _isSubmitting = true;
         _error = null;
         var result = await AuthService.SignupAsync(_model);
@@ -79,6 +104,6 @@
             return;
         }
 
-        Navigation.NavigateTo("/dashboard", true);
+        Navigation.NavigateTo("/dashboard", replace: true);
     }
 }

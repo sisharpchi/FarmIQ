@@ -3,7 +3,7 @@
 @code {
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && !AuthStateProvider.IsInitialized)
         {
             await AuthStateProvider.RestoreSessionAsync();
         }

@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using FarmIQ.Infrastructure.Configuration;
 using FarmIQ.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 
@@ -11,12 +13,22 @@ namespace FarmIQ.API.Controllers;
 public sealed class AuthController(
     UserManager<ApplicationUser> userManager,
     SignInManager<ApplicationUser> signInManager,
-    RoleManager<IdentityRole<Guid>> roleManager) : ControllerBase
+    RoleManager<IdentityRole<Guid>> roleManager,
+    IOptions<AuthOptions> authOptions) : ControllerBase
 {
     [HttpPost("~/api/auth/signup")]
     [Produces("application/json")]
     public async Task<IActionResult> SignUp([FromBody] SignUpRequest request)
     {
+        if (!authOptions.Value.EnablePublicSignup)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = "public_signup_disabled",
+                error_description = "Public signup is disabled. Ask an existing admin to create your account."
+            });
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -68,7 +80,30 @@ public sealed class AuthController(
     [Produces("application/json")]
     public async Task<IActionResult> Exchange()
     {
-        var form = await Request.ReadFormAsync();
+        if (!HasSupportedFormContentType(Request.ContentType))
+        {
+            return BadRequest(new
+            {
+                error = "invalid_request",
+                error_description = "Token requests must use form content."
+            });
+        }
+
+        IFormCollection form;
+
+        try
+        {
+            form = await Request.ReadFormAsync();
+        }
+        catch (Exception)
+        {
+            return BadRequest(new
+            {
+                error = "invalid_request",
+                error_description = "Token request form payload could not be read."
+            });
+        }
+
         var grantType = form["grant_type"].ToString();
         var username = form["username"].ToString();
         var password = form["password"].ToString();
@@ -84,7 +119,25 @@ public sealed class AuthController(
             return Forbid(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
         }
 
+        if (await userManager.IsLockedOutAsync(user))
+        {
+            return BadRequest(new
+            {
+                error = "account_disabled",
+                error_description = "This FarmIQ admin account is disabled or locked."
+            });
+        }
+
         var result = await signInManager.CheckPasswordSignInAsync(user, password, lockoutOnFailure: true);
+        if (result.IsLockedOut)
+        {
+            return BadRequest(new
+            {
+                error = "account_disabled",
+                error_description = "This FarmIQ admin account is disabled or locked."
+            });
+        }
+
         if (!result.Succeeded)
         {
             return Forbid(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
@@ -114,6 +167,17 @@ public sealed class AuthController(
         });
 
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    private static bool HasSupportedFormContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return false;
+        }
+
+        return contentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
+            || contentType.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase);
     }
 
     public sealed class SignUpRequest

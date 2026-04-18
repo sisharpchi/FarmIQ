@@ -1,5 +1,5 @@
 @page "/deliveries"
-@attribute [Authorize(Roles = "Admin,Ops")]
+@attribute [RouteAccess("Admin", "Ops")]
 @implements IDisposable
 @inject FarmAdminApiClient ApiClient
 @inject RefreshCoordinator RefreshCoordinator
@@ -55,11 +55,11 @@
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync();
-        _pollingHandle = RefreshCoordinator.StartPolling(async () =>
+        _pollingHandle = RefreshCoordinator.StartPolling(RefreshArea.Deliveries, async () =>
         {
             await LoadAsync();
             await InvokeAsync(StateHasChanged);
-        }, TimeSpan.FromSeconds(12));
+        });
     }
 
     private async Task LoadAsync()

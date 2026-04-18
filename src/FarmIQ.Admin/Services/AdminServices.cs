@@ -18,6 +18,13 @@ public interface IAuthService
     Task<AuthSessionModel?> GetSessionAsync();
 }
 
+public enum RefreshArea
+{
+    Dashboard,
+    Jobs,
+    Deliveries
+}
+
 public sealed class BrowserSessionStore(IJSRuntime jsRuntime)
 {
     private const string SessionKey = "farmiq.admin.session";
@@ -35,6 +42,8 @@ public sealed class BrowserSessionStore(IJSRuntime jsRuntime)
 public sealed class FarmAuthStateProvider(BrowserSessionStore sessionStore) : AuthenticationStateProvider
 {
     private ClaimsPrincipal _currentUser = new(new ClaimsIdentity());
+    public bool IsInitialized { get; private set; }
+    public AuthSessionModel? CurrentSession { get; private set; }
 
     public override Task<AuthenticationState> GetAuthenticationStateAsync() =>
         Task.FromResult(new AuthenticationState(_currentUser));
@@ -42,13 +51,26 @@ public sealed class FarmAuthStateProvider(BrowserSessionStore sessionStore) : Au
     public async Task RestoreSessionAsync()
     {
         var session = await sessionStore.LoadAsync();
-        _currentUser = CreatePrincipal(session?.User);
+        if (session is null || session.ExpiresUtc <= DateTime.UtcNow)
+        {
+            await sessionStore.RemoveAsync();
+            CurrentSession = null;
+        }
+        else
+        {
+            CurrentSession = session;
+        }
+
+        _currentUser = CreatePrincipal(CurrentSession?.User);
+        IsInitialized = true;
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
 
     public async Task SetSessionAsync(AuthSessionModel session)
     {
         await sessionStore.SaveAsync(session);
+        CurrentSession = session;
+        IsInitialized = true;
         _currentUser = CreatePrincipal(session.User);
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
@@ -56,6 +78,8 @@ public sealed class FarmAuthStateProvider(BrowserSessionStore sessionStore) : Au
     public async Task ClearSessionAsync()
     {
         await sessionStore.RemoveAsync();
+        CurrentSession = null;
+        IsInitialized = true;
         _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
         NotifyAuthenticationStateChanged(GetAuthenticationStateAsync());
     }
@@ -83,7 +107,7 @@ public sealed class AuthService(
     BrowserSessionStore sessionStore,
     FarmAuthStateProvider authStateProvider) : IAuthService
 {
-    private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7178";
+    private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7127";
 
     public async Task<(bool Success, string? ErrorMessage)> LoginAsync(LoginRequestModel request)
     {
@@ -100,7 +124,7 @@ public sealed class AuthService(
             var tokenResponse = await client.PostAsync("/connect/token", form);
             if (!tokenResponse.IsSuccessStatusCode)
             {
-                return (false, "Email or password was invalid.");
+                return (false, await ReadErrorMessageAsync(tokenResponse));
             }
 
             var token = await tokenResponse.Content.ReadFromJsonAsync<TokenResponse>();
@@ -166,6 +190,11 @@ public sealed class AuthService(
 
     public async Task<AuthSessionModel?> GetSessionAsync()
     {
+        if (authStateProvider.IsInitialized)
+        {
+            return authStateProvider.CurrentSession;
+        }
+
         var session = await sessionStore.LoadAsync();
         if (session is null || session.ExpiresUtc <= DateTime.UtcNow)
         {
@@ -179,11 +208,49 @@ public sealed class AuthService(
 
         return session;
     }
+
+    private static async Task<string> ReadErrorMessageAsync(HttpResponseMessage response)
+    {
+        var raw = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "Email or password was invalid.";
+        }
+
+        try
+        {
+            var problem = JsonSerializer.Deserialize<ApiErrorModel>(raw);
+            if (!string.IsNullOrWhiteSpace(problem?.ErrorDescription))
+            {
+                return problem.ErrorDescription;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Detail))
+            {
+                return problem.Detail;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Title))
+            {
+                return problem.Title;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Error))
+            {
+                return problem.Error;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return raw.Trim().Trim('"');
+    }
 }
 
 public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthService authService)
 {
-    private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7178";
+    private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7127";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<PagedResponseModel<ConversationSummaryModel>> GetConversationsAsync(int page, int pageSize) =>
@@ -222,6 +289,9 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
     public async Task<UserSessionModel?> GetSessionInfoAsync() =>
         await GetAsync<UserSessionModel>("/api/admin/session");
 
+    public async Task<PagedResponseModel<AdminUserSummaryModel>> GetUsersAsync(int page, int pageSize) =>
+        await GetAsync<PagedResponseModel<AdminUserSummaryModel>>($"/api/admin/users?page={page}&pageSize={pageSize}") ?? new();
+
     public async Task<bool> RetryJobAsync(Guid jobId)
     {
         var session = await authService.GetSessionAsync();
@@ -235,10 +305,77 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         return response.IsSuccessStatusCode;
     }
 
+    public async Task<(bool Success, string? ErrorMessage)> CreateUserAsync(AdminUserCreateModel request)
+    {
+        try
+        {
+            var response = await PostAsync("/api/admin/users", request);
+            return response;
+        }
+        catch (HttpRequestException)
+        {
+            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+        }
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> DisableUserAsync(Guid userId)
+    {
+        try
+        {
+            return await PostAsync($"/api/admin/users/{userId}/disable", new { });
+        }
+        catch (HttpRequestException)
+        {
+            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+        }
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> EnableUserAsync(Guid userId)
+    {
+        try
+        {
+            return await PostAsync($"/api/admin/users/{userId}/enable", new { });
+        }
+        catch (HttpRequestException)
+        {
+            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+        }
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> ResetPasswordAsync(Guid userId, string newPassword)
+    {
+        try
+        {
+            return await PostAsync($"/api/admin/users/{userId}/reset-password", new AdminResetPasswordModel
+            {
+                NewPassword = newPassword
+            });
+        }
+        catch (HttpRequestException)
+        {
+            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+        }
+    }
+
+    public async Task<(bool Success, string? ErrorMessage)> UpdateUserRolesAsync(Guid userId, IReadOnlyCollection<string> roles)
+    {
+        try
+        {
+            return await PostAsync($"/api/admin/users/{userId}/roles", new AdminUserRoleUpdateModel
+            {
+                Roles = roles
+            });
+        }
+        catch (HttpRequestException)
+        {
+            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+        }
+    }
+
     public async Task<bool> IsApiHealthyAsync()
     {
         using var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
-        var response = await client.GetAsync("/health");
+        var response = await client.GetAsync("/health/ready");
         return response.StatusCode == HttpStatusCode.OK;
     }
 
@@ -255,11 +392,74 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             await authService.LogoutAsync();
-            return default;
+            throw new UnauthorizedAccessException("Your admin session expired. Please sign in again.");
         }
 
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<T>(JsonOptions);
+    }
+
+    private async Task<(bool Success, string? ErrorMessage)> PostAsync<TRequest>(string url, TRequest request)
+    {
+        var session = await authService.GetSessionAsync();
+        if (session is null)
+        {
+            return (false, "Your admin session expired. Please sign in again.");
+        }
+
+        using var client = CreateClient(session.AccessToken);
+        var response = await client.PostAsJsonAsync(url, request);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            await authService.LogoutAsync();
+            return (false, "Your admin session expired. Please sign in again.");
+        }
+
+        if (response.IsSuccessStatusCode)
+        {
+            return (true, null);
+        }
+
+        var error = await ReadErrorAsync(response);
+        return (false, error);
+    }
+
+    private static async Task<string> ReadErrorAsync(HttpResponseMessage response)
+    {
+        var raw = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "The request could not be completed.";
+        }
+
+        try
+        {
+            var problem = JsonSerializer.Deserialize<ApiErrorModel>(raw, JsonOptions);
+            if (!string.IsNullOrWhiteSpace(problem?.ErrorDescription))
+            {
+                return problem.ErrorDescription;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Detail))
+            {
+                return problem.Detail;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Title))
+            {
+                return problem.Title;
+            }
+
+            if (!string.IsNullOrWhiteSpace(problem?.Error))
+            {
+                return problem.Error;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return raw.Trim().Trim('"');
     }
 
     private HttpClient CreateClient(string accessToken)
@@ -270,8 +470,11 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
     }
 }
 
-public sealed class RefreshCoordinator
+public sealed class RefreshCoordinator(IConfiguration configuration)
 {
+    public IDisposable StartPolling(RefreshArea area, Func<Task> refreshAction) =>
+        StartPolling(refreshAction, ResolveInterval(area));
+
     public IDisposable StartPolling(Func<Task> refreshAction, TimeSpan interval)
     {
         var cts = new CancellationTokenSource();
@@ -297,6 +500,19 @@ public sealed class RefreshCoordinator
         }, cts.Token);
 
         return new PollingHandle(cts);
+    }
+
+    private TimeSpan ResolveInterval(RefreshArea area)
+    {
+        var seconds = area switch
+        {
+            RefreshArea.Dashboard => configuration.GetValue("Polling:DashboardSeconds", 15),
+            RefreshArea.Jobs => configuration.GetValue("Polling:JobsSeconds", 10),
+            RefreshArea.Deliveries => configuration.GetValue("Polling:DeliveriesSeconds", 12),
+            _ => 15
+        };
+
+        return TimeSpan.FromSeconds(Math.Max(seconds, 5));
     }
 
     private sealed class PollingHandle(CancellationTokenSource cts) : IDisposable

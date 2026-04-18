@@ -1,3 +1,4 @@
+using FarmIQ.API.Middleware;
 using FarmIQ.Application.Abstractions;
 using FarmIQ.Application.Contracts;
 using FarmIQ.Shared;
@@ -9,7 +10,9 @@ namespace FarmIQ.API.Controllers;
 [ApiController]
 [Authorize(Roles = "Admin,Ops,Analyst")]
 [Route("api/admin")]
-public sealed class AdminController(IAdminQueryService adminQueryService) : ControllerBase
+public sealed class AdminController(
+    IAdminQueryService adminQueryService,
+    IAdminUserManagementService adminUserManagementService) : ControllerBase
 {
     [HttpGet("conversations")]
     public async Task<IActionResult> GetConversations([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default) =>
@@ -77,5 +80,60 @@ public sealed class AdminController(IAdminQueryService adminQueryService) : Cont
             analytics.CompletedAdvisories,
             analytics.FailedJobs
         });
+    }
+
+    [HttpGet("users")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> GetUsers([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default) =>
+        Ok(await adminUserManagementService.GetUsersAsync(page, pageSize, cancellationToken));
+
+    [HttpPost("users")]
+    [Authorize(Roles = "Admin")]
+    public Task<IActionResult> CreateUser([FromBody] AdminCreateUserRequest request, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async () =>
+            {
+                var created = await adminUserManagementService.CreateUserAsync(request, GetActor(), GetCorrelationId(), cancellationToken);
+                return Created($"/api/admin/users/{created.UserId}", created);
+            });
+
+    [HttpPost("users/{userId:guid}/disable")]
+    [Authorize(Roles = "Admin")]
+    public Task<IActionResult> DisableUser(Guid userId, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () => Ok(await adminUserManagementService.DisableUserAsync(userId, GetActor(), GetCorrelationId(), cancellationToken)));
+
+    [HttpPost("users/{userId:guid}/enable")]
+    [Authorize(Roles = "Admin")]
+    public Task<IActionResult> EnableUser(Guid userId, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () => Ok(await adminUserManagementService.EnableUserAsync(userId, GetActor(), GetCorrelationId(), cancellationToken)));
+
+    [HttpPost("users/{userId:guid}/reset-password")]
+    [Authorize(Roles = "Admin")]
+    public Task<IActionResult> ResetPassword(Guid userId, [FromBody] AdminResetPasswordRequest request, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () => Ok(await adminUserManagementService.ResetPasswordAsync(userId, request, GetActor(), GetCorrelationId(), cancellationToken)));
+
+    [HttpPost("users/{userId:guid}/roles")]
+    [Authorize(Roles = "Admin")]
+    public Task<IActionResult> UpdateRoles(Guid userId, [FromBody] AdminUpdateUserRolesRequest request, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () => Ok(await adminUserManagementService.UpdateRolesAsync(userId, request, GetActor(), GetCorrelationId(), cancellationToken)));
+
+    private string GetActor() => User.Identity?.Name ?? User.Identity?.AuthenticationType ?? "system";
+
+    private string? GetCorrelationId() => HttpContext.Items[CorrelationIdMiddleware.HeaderName]?.ToString();
+
+    private async Task<IActionResult> ExecuteAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new
+            {
+                error = "admin_operation_failed",
+                error_description = exception.Message
+            });
+        }
     }
 }

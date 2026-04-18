@@ -39,6 +39,7 @@ public sealed class AdvisoryProcessingWorker(
     IServiceScopeFactory serviceScopeFactory,
     IBackgroundJobQueue backgroundJobQueue,
     IOptions<ProcessingOptions> processingOptions,
+    WorkerHeartbeat workerHeartbeat,
     ILogger<AdvisoryProcessingWorker> logger) : BackgroundService
 {
     private readonly string _workerId = $"{Environment.MachineName}-{Guid.NewGuid():N}";
@@ -49,6 +50,7 @@ public sealed class AdvisoryProcessingWorker(
         {
             try
             {
+                workerHeartbeat.RecordHeartbeat();
                 await backgroundJobQueue.WaitForSignalAsync(stoppingToken);
                 using var scope = serviceScopeFactory.CreateScope();
                 var leaseService = scope.ServiceProvider.GetRequiredService<IProcessingJobLeaseService>();
@@ -62,6 +64,7 @@ public sealed class AdvisoryProcessingWorker(
                 }
 
                 await workflow.ProcessAsync(claimedJob.Id, stoppingToken);
+                workerHeartbeat.RecordHeartbeat();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

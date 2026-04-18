@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -15,8 +16,10 @@ namespace FarmIQ.Infrastructure.Services;
 
 public static class InfrastructureServiceCollectionExtensions
 {
-    public static IServiceCollection AddFarmIQInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddFarmIQInfrastructure(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
+        var authOptions = configuration.GetSection(AuthOptions.SectionName).Get<AuthOptions>() ?? new AuthOptions();
+
         services.AddOptions<OpenWeatherMapOptions>()
             .Bind(configuration.GetSection(OpenWeatherMapOptions.SectionName))
             .Validate(x => !string.IsNullOrWhiteSpace(x.BaseUrl), "OpenWeatherMap base URL is required.")
@@ -39,6 +42,16 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<ProcessingOptions>()
             .Bind(configuration.GetSection(ProcessingOptions.SectionName))
             .Validate(x => x.PollIntervalSeconds > 0 && x.LeaseDurationMinutes > 0, "Processing options must be positive.")
+            .ValidateOnStart();
+        services.AddOptions<OpenAIOptions>()
+            .Bind(configuration.GetSection(OpenAIOptions.SectionName))
+            .Validate(x => !x.Enabled || !string.IsNullOrWhiteSpace(x.ApiKey), "OpenAI ApiKey is required when OpenAI is enabled.")
+            .Validate(x => !x.Enabled || (!string.IsNullOrWhiteSpace(x.VisionModel) && !string.IsNullOrWhiteSpace(x.TranscriptionModel)), "OpenAI model names are required when OpenAI is enabled.")
+            .Validate(x => x.TimeoutSeconds > 0 && x.MaxImagesPerRequest > 0, "OpenAI options must be positive.")
+            .ValidateOnStart();
+        services.AddOptions<AuthOptions>()
+            .Bind(configuration.GetSection(AuthOptions.SectionName))
+            .Validate(x => x.AccessTokenLifetimeMinutes > 0, "Auth access token lifetime must be positive.")
             .ValidateOnStart();
 
         services.AddDbContext<FarmIQDbContext>(options =>
@@ -66,14 +79,27 @@ public static class InfrastructureServiceCollectionExtensions
             {
                 options.UseEntityFrameworkCore()
                     .UseDbContext<FarmIQDbContext>();
+                options.UseEntityFrameworkCore()
+                    .ReplaceDefaultEntities<Guid>();
             })
             .AddServer(options =>
             {
                 options.SetTokenEndpointUris("/connect/token");
                 options.AllowPasswordFlow();
                 options.AcceptAnonymousClients();
-                options.AddDevelopmentEncryptionCertificate()
-                    .AddDevelopmentSigningCertificate();
+                options.SetAccessTokenLifetime(TimeSpan.FromMinutes(authOptions.AccessTokenLifetimeMinutes));
+
+                if (environment.IsDevelopment())
+                {
+                    options.AddDevelopmentEncryptionCertificate()
+                        .AddDevelopmentSigningCertificate();
+                }
+                else
+                {
+                    options.AddEphemeralEncryptionKey()
+                        .AddEphemeralSigningKey();
+                }
+
                 options.UseAspNetCore()
                     .EnableTokenEndpointPassthrough();
             })
@@ -85,22 +111,28 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddHttpClient(nameof(LocalMediaStorageService));
         services.AddHttpClient(nameof(OpenWeatherMapService));
+        services.AddHttpClient(nameof(OpenAiCropAnalysisService));
+        services.AddHttpClient(nameof(OpenAiSpeechToTextService));
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IMessageIngestionService, MessageIngestionService>();
         services.AddScoped<IAdvisoryWorkflowService, AdvisoryWorkflowService>();
+        services.AddScoped<IInboundIntentClassifier, InboundIntentClassifier>();
+        services.AddScoped<IConversationResponseComposer, ConversationResponseComposer>();
         services.AddScoped<IProcessingJobLeaseService, ProcessingJobLeaseService>();
         services.AddScoped<IAdminQueryService, AdminQueryService>();
+        services.AddScoped<IAdminUserManagementService, AdminUserManagementService>();
         services.AddSingleton<IProcessingRuntimeSettings, ProcessingRuntimeSettings>();
+        services.AddSingleton<WorkerHeartbeat>();
 
         services.AddSingleton<IBackgroundJobQueue, InMemoryBackgroundJobQueue>();
         services.AddHostedService<AdvisoryProcessingWorker>();
 
         services.AddHttpContextAccessor();
         services.AddScoped<IMediaStorageService, LocalMediaStorageService>();
-        services.AddScoped<ISpeechToTextService, MockSpeechToTextService>();
+        services.AddScoped<ISpeechToTextService, OpenAiSpeechToTextService>();
         services.AddScoped<ILanguageService, MockLanguageService>();
-        services.AddScoped<ICropAnalysisService, MockCropAnalysisService>();
+        services.AddScoped<ICropAnalysisService, OpenAiCropAnalysisService>();
         services.AddScoped<IWeatherService, OpenWeatherMapService>();
 
         services.AddScoped<IMessageChannelService, WhatsAppService>();
@@ -168,6 +200,13 @@ internal sealed class ConfigurationValidationStartupFilter : IStartupFilter
             _ = app.ApplicationServices.GetRequiredService<IOptions<SeedAdminOptions>>().Value;
             _ = app.ApplicationServices.GetRequiredService<IOptions<WebhookOptions>>().Value;
             _ = app.ApplicationServices.GetRequiredService<IOptions<ProcessingOptions>>().Value;
+            _ = app.ApplicationServices.GetRequiredService<IOptions<OpenAIOptions>>().Value;
+            _ = app.ApplicationServices.GetRequiredService<IOptions<AuthOptions>>().Value;
+            var configuration = app.ApplicationServices.GetRequiredService<IConfiguration>();
+            if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("DefaultConnection")))
+            {
+                throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
+            }
             next(app);
         };
     }

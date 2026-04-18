@@ -30,6 +30,28 @@ public enum MessageLifecycleStatus
     Replied = 7
 }
 
+public enum InboundIntentType
+{
+    Unknown = 0,
+    StartCommand = 1,
+    HelpCommand = 2,
+    Greeting = 3,
+    SmallTalk = 4,
+    SymptomReport = 5,
+    MediaOnly = 6,
+    LocationShare = 7,
+    Unsupported = 8
+}
+
+public enum ConversationAssistantState
+{
+    Idle = 0,
+    AwaitingProblemDetails = 1,
+    AwaitingPhoto = 2,
+    AwaitingLocation = 3,
+    AdvisorySent = 4
+}
+
 public enum ProcessingJobStatus
 {
     Pending = 1,
@@ -45,6 +67,12 @@ public enum AdvisoryStatus
     Ready = 2,
     Sent = 3,
     Failed = 4
+}
+
+public enum AdvisoryAnalysisSource
+{
+    Fallback = 0,
+    OpenAi = 1
 }
 
 public enum OutboundDeliveryStatus

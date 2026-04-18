@@ -20,9 +20,8 @@ public sealed class FarmWorkflowTests
     public async Task AcceptAsync_ShouldPersistInboundMessageAndQueueProcessingJob()
     {
         await using var dbContext = CreateDbContext();
-        var unitOfWork = new UnitOfWork(dbContext);
         var queue = new FakeBackgroundJobQueue();
-        var service = new MessageIngestionService(unitOfWork, queue);
+        var service = CreateIngestionService(dbContext, queue);
 
         var result = await service.AcceptAsync(new NormalizedInboundMessageCommand
         {
@@ -57,16 +56,15 @@ public sealed class FarmWorkflowTests
     public async Task AcceptAsync_ShouldDeduplicateRepeatedWebhookDelivery()
     {
         await using var dbContext = CreateDbContext();
-        var unitOfWork = new UnitOfWork(dbContext);
         var queue = new FakeBackgroundJobQueue();
-        var service = new MessageIngestionService(unitOfWork, queue);
+        var service = CreateIngestionService(dbContext, queue);
         var command = new NormalizedInboundMessageCommand
         {
             ChannelType = ChannelType.WhatsApp,
             ExternalUserId = "farmer-1",
             ExternalConversationId = "wa-chat-1",
             ExternalMessageId = "wamid.1",
-            Text = "help",
+            Text = "maize leaves have dark spots",
             IncomingLanguage = "en"
         };
 
@@ -78,6 +76,53 @@ public sealed class FarmWorkflowTests
         dbContext.InboundMessages.Should().HaveCount(1);
         dbContext.ProcessingJobs.Should().HaveCount(1);
         dbContext.WebhookDeliveries.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldReplyImmediatelyToStartCommandWithoutQueueingAdvisory()
+    {
+        await using var dbContext = CreateDbContext();
+        var queue = new FakeBackgroundJobQueue();
+        var service = CreateIngestionService(dbContext, queue);
+
+        var result = await service.AcceptAsync(new NormalizedInboundMessageCommand
+        {
+            ChannelType = ChannelType.Telegram,
+            ExternalUserId = "farmer-start",
+            ExternalConversationId = "chat-start",
+            ExternalMessageId = "msg-start",
+            Text = "/start",
+            IncomingLanguage = "en"
+        });
+
+        result.AcceptedMessage.Status.Should().Be(MessageLifecycleStatus.Replied);
+        dbContext.ProcessingJobs.Should().BeEmpty();
+        dbContext.OutboundMessages.Should().ContainSingle();
+        dbContext.InboundMessages.Single().DetectedIntent.Should().Be(InboundIntentType.StartCommand);
+        queue.JobIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AcceptAsync_ShouldTreatGreetingAsFollowUpPromptInsteadOfAdvisory()
+    {
+        await using var dbContext = CreateDbContext();
+        var queue = new FakeBackgroundJobQueue();
+        var service = CreateIngestionService(dbContext, queue);
+
+        var result = await service.AcceptAsync(new NormalizedInboundMessageCommand
+        {
+            ChannelType = ChannelType.Telegram,
+            ExternalUserId = "farmer-greeting",
+            ExternalConversationId = "chat-greeting",
+            ExternalMessageId = "msg-greeting",
+            Text = "hey",
+            IncomingLanguage = "en"
+        });
+
+        result.AcceptedMessage.Status.Should().Be(MessageLifecycleStatus.Replied);
+        dbContext.ProcessingJobs.Should().BeEmpty();
+        dbContext.OutboundMessages.Should().ContainSingle();
+        dbContext.InboundMessages.Single().DetectedIntent.Should().Be(InboundIntentType.Greeting);
     }
 
     [Fact]
@@ -187,6 +232,31 @@ public sealed class FarmWorkflowTests
     }
 
     [Fact]
+    public async Task TelegramService_ShouldParseLocationPayload()
+    {
+        var service = new TelegramService(new FakeHttpClientFactory(), Options.Create(new ChannelApiOptions()), NullLogger<TelegramService>.Instance);
+        var command = await service.ParseAsync(new WebhookEnvelopeDto
+        {
+            RawBody = """
+            {
+              "update_id": 2,
+              "message": {
+                "message_id": 100,
+                "chat": { "id": 12345 },
+                "from": { "id": 456, "first_name": "Asha", "language_code": "en" },
+                "location": { "latitude": 41.2995, "longitude": 69.2401 }
+              }
+            }
+            """
+        });
+
+        command.HasLocation.Should().BeTrue();
+        command.Latitude.Should().Be(41.2995);
+        command.Longitude.Should().Be(69.2401);
+        command.IsUnsupportedEvent.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task WhatsAppService_ShouldParseImagePayload()
     {
         var service = new WhatsAppService(
@@ -292,6 +362,14 @@ public sealed class FarmWorkflowTests
             Status = MessageLifecycleStatus.Queued
         };
 
+    private static MessageIngestionService CreateIngestionService(FarmIQDbContext dbContext, FakeBackgroundJobQueue queue) =>
+        new(
+            new UnitOfWork(dbContext),
+            queue,
+            new InboundIntentClassifier(),
+            new ConversationResponseComposer(new MockLanguageService()),
+            new FakeMessageChannelResolver());
+
     private sealed class FakeBackgroundJobQueue : IBackgroundJobQueue
     {
         public List<Guid> JobIds { get; } = [];
@@ -308,6 +386,22 @@ public sealed class FarmWorkflowTests
     private sealed class FakeRuntimeSettings(int leaseDurationMinutes) : IProcessingRuntimeSettings
     {
         public int LeaseDurationMinutes { get; } = leaseDurationMinutes;
+    }
+
+    private sealed class FakeMessageChannelResolver : IMessageChannelResolver
+    {
+        public IMessageChannelService Resolve(ChannelType channelType) => new FakeMessageChannelService(channelType);
+    }
+
+    private sealed class FakeMessageChannelService(ChannelType channelType) : IMessageChannelService
+    {
+        public ChannelType ChannelType { get; } = channelType;
+
+        public Task<NormalizedInboundMessageCommand> ParseAsync(WebhookEnvelopeDto envelope, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<ChannelSendResult> SendReplyAsync(ChannelReplyRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChannelSendResult(true, Guid.NewGuid().ToString("N"), null));
     }
 
     private sealed class FakeHttpClientFactory : IHttpClientFactory

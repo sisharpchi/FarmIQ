@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 
 namespace FarmIQ.Infrastructure.Services;
 
-public abstract class MessageChannelServiceBase(ILogger logger) : IMessageChannelService
+public abstract class MessageChannelServiceBase : IMessageChannelService
 {
     public abstract ChannelType ChannelType { get; }
 
@@ -61,6 +61,27 @@ public abstract class MessageChannelServiceBase(ILogger logger) : IMessageChanne
         return null;
     }
 
+    protected static double? GetDouble(JsonElement element, string propertyName)
+    {
+        var property = GetProperty(element, propertyName);
+        if (property is null)
+        {
+            return null;
+        }
+
+        if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        if (property.Value.ValueKind == JsonValueKind.String && double.TryParse(property.Value.GetString(), out var parsedValue))
+        {
+            return parsedValue;
+        }
+
+        return null;
+    }
+
     protected static string HexHmac(string secret, string body)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
@@ -72,7 +93,7 @@ public sealed class WhatsAppService(
     IHttpClientFactory httpClientFactory,
     IOptions<ChannelApiOptions> channelOptions,
     IOptions<WebhookOptions> webhookOptions,
-    ILogger<WhatsAppService> logger) : MessageChannelServiceBase(logger)
+    ILogger<WhatsAppService> logger) : MessageChannelServiceBase
 {
     public override ChannelType ChannelType => ChannelType.WhatsApp;
 
@@ -142,6 +163,7 @@ public sealed class WhatsAppService(
             command.Text = GetString(image, "caption");
             command.Media.Add(new InboundMediaDto
             {
+                ChannelType = ChannelType.WhatsApp,
                 MediaType = MediaType.Image,
                 ExternalMediaId = GetString(image, "id") ?? $"{externalMessageId}-image",
                 Url = GetString(image, "id") ?? "whatsapp-media",
@@ -153,12 +175,20 @@ public sealed class WhatsAppService(
         {
             command.Media.Add(new InboundMediaDto
             {
+                ChannelType = ChannelType.WhatsApp,
                 MediaType = MediaType.Voice,
                 ExternalMediaId = GetString(audio, "id") ?? $"{externalMessageId}-audio",
                 Url = GetString(audio, "id") ?? "whatsapp-audio",
                 FileName = "whatsapp-voice.ogg",
                 ContentType = "audio/ogg"
             });
+        }
+        else if (type == "location" && message.TryGetProperty("location", out var location))
+        {
+            command.Latitude = GetDouble(location, "latitude");
+            command.Longitude = GetDouble(location, "longitude");
+            command.HasLocation = command.Latitude.HasValue && command.Longitude.HasValue;
+            command.EventType = "location";
         }
         else
         {
@@ -199,7 +229,7 @@ public sealed class WhatsAppService(
 public sealed class TelegramService(
     IHttpClientFactory httpClientFactory,
     IOptions<ChannelApiOptions> channelOptions,
-    ILogger<TelegramService> logger) : MessageChannelServiceBase(logger)
+    ILogger<TelegramService> logger) : MessageChannelServiceBase
 {
     public override ChannelType ChannelType => ChannelType.Telegram;
 
@@ -232,6 +262,7 @@ public sealed class TelegramService(
             var photo = photos[photos.GetArrayLength() - 1];
             command.Media.Add(new InboundMediaDto
             {
+                ChannelType = ChannelType.Telegram,
                 MediaType = MediaType.Image,
                 ExternalMediaId = GetString(photo, "file_id") ?? $"{externalMessageId}-photo",
                 Url = GetString(photo, "file_id") ?? "telegram-photo",
@@ -244,6 +275,7 @@ public sealed class TelegramService(
         {
             command.Media.Add(new InboundMediaDto
             {
+                ChannelType = ChannelType.Telegram,
                 MediaType = MediaType.Voice,
                 ExternalMediaId = GetString(voice, "file_id") ?? $"{externalMessageId}-voice",
                 Url = GetString(voice, "file_id") ?? "telegram-voice",
@@ -252,7 +284,15 @@ public sealed class TelegramService(
             });
         }
 
-        if (string.IsNullOrWhiteSpace(command.Text) && command.Media.Count == 0)
+        if (message.TryGetProperty("location", out var location))
+        {
+            command.Latitude = GetDouble(location, "latitude");
+            command.Longitude = GetDouble(location, "longitude");
+            command.HasLocation = command.Latitude.HasValue && command.Longitude.HasValue;
+            command.EventType = "location";
+        }
+
+        if (string.IsNullOrWhiteSpace(command.Text) && command.Media.Count == 0 && !command.HasLocation)
         {
             command.IsUnsupportedEvent = true;
             command.EventType = "unsupported";
@@ -290,7 +330,7 @@ public sealed class InstagramService(
     IHttpClientFactory httpClientFactory,
     IOptions<ChannelApiOptions> channelOptions,
     IOptions<WebhookOptions> webhookOptions,
-    ILogger<InstagramService> logger) : MessageChannelServiceBase(logger)
+    ILogger<InstagramService> logger) : MessageChannelServiceBase
 {
     public override ChannelType ChannelType => ChannelType.Instagram;
 
@@ -338,6 +378,7 @@ public sealed class InstagramService(
                 {
                     command.Media.Add(new InboundMediaDto
                     {
+                        ChannelType = ChannelType.Instagram,
                         MediaType = MediaType.Image,
                         ExternalMediaId = GetString(payload, "url") ?? $"{externalMessageId}-image",
                         Url = GetString(payload, "url") ?? "instagram-image",
@@ -348,7 +389,7 @@ public sealed class InstagramService(
             }
         }
 
-        if (string.IsNullOrWhiteSpace(command.Text) && command.Media.Count == 0)
+        if (string.IsNullOrWhiteSpace(command.Text) && command.Media.Count == 0 && !command.HasLocation)
         {
             command.IsUnsupportedEvent = true;
             command.EventType = "unsupported";

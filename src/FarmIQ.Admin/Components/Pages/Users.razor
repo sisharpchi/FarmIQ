@@ -1,0 +1,372 @@
+@page "/users"
+@attribute [RouteAccess("Admin")]
+@inject FarmAdminApiClient ApiClient
+
+<PageTitle>Users | FarmIQ Admin</PageTitle>
+
+<h1>Users</h1>
+
+<div class="page-grid">
+    <section class="panel-card">
+        <h2>Create account</h2>
+
+        <EditForm Model="_createModel" OnValidSubmit="CreateUserAsync">
+            <DataAnnotationsValidator />
+
+            <div class="form-field">
+                <label>Display name</label>
+                <InputText class="form-control" @bind-Value="_createModel.DisplayName" />
+            </div>
+
+            <div class="form-field">
+                <label>Email</label>
+                <InputText class="form-control" @bind-Value="_createModel.Email" />
+            </div>
+
+            <div class="form-field">
+                <label>Initial password</label>
+                <InputText class="form-control" type="password" @bind-Value="_createModel.Password" />
+            </div>
+
+            <div class="form-field">
+                <label>Roles</label>
+                <div class="role-grid">
+                    @foreach (var role in _createRoleToggles)
+                    {
+                        <label class="role-pill">
+                            <input type="checkbox" @bind="role.IsSelected" />
+                            <span>@role.Name</span>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_createMessage))
+            {
+                <div class="@AlertClass(_createSucceeded)">@_createMessage</div>
+            }
+
+            <button class="btn btn-success" type="submit" disabled="@_submittingCreate">
+                @(_submittingCreate ? "Creating..." : "Create user")
+            </button>
+        </EditForm>
+
+        <hr />
+
+        <div class="table-tools">
+            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+        </div>
+
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_users is not null && _users.Items.Count == 0)" Error="@_error" LoadingText="Loading admin users..." EmptyText="No admin users were found." />
+
+        @if (_users is not null && string.IsNullOrWhiteSpace(_error))
+        {
+            <table class="table table-darkless">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Roles</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var user in _users.Items)
+                    {
+                        <tr class="@(IsSelected(user) ? "table-active" : null)">
+                            <td>@user.DisplayName</td>
+                            <td>@user.Email</td>
+                            <td>@string.Join(", ", user.Roles)</td>
+                            <td>@(user.IsEnabled ? "Enabled" : "Disabled")</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => SelectUser(user)">Manage</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <PaginationBar Page="@_page" PageSize="@_pageSize" TotalCount="@_users.TotalCount" OnPageChanged="HandlePageChangedAsync" />
+        }
+    </section>
+
+    <section class="panel-card">
+        <h2>User controls</h2>
+
+        @if (_selectedUser is null)
+        {
+            <p>Select a user to adjust roles, disable access, or issue a new password.</p>
+        }
+        else
+        {
+            <div class="detail-meta">
+                <strong>@_selectedUser.DisplayName</strong>
+                <span>@(_selectedUser.IsEnabled ? "Enabled" : "Disabled")</span>
+            </div>
+
+            <p class="subtle-copy user-detail-copy">@_selectedUser.Email</p>
+
+            <div class="form-field">
+                <label>Roles</label>
+                <div class="role-grid">
+                    @foreach (var role in _selectedRoleToggles)
+                    {
+                        <label class="role-pill">
+                            <input type="checkbox" @bind="role.IsSelected" />
+                            <span>@role.Name</span>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            <div class="action-row">
+                <button class="btn btn-outline-success" @onclick="SaveRolesAsync" disabled="@_workingSelectedUser">Save roles</button>
+                @if (_selectedUser.IsEnabled)
+                {
+                    <button class="btn btn-outline-danger" @onclick="DisableSelectedUserAsync" disabled="@_workingSelectedUser">Disable access</button>
+                }
+                else
+                {
+                    <button class="btn btn-success" @onclick="EnableSelectedUserAsync" disabled="@_workingSelectedUser">Enable access</button>
+                }
+            </div>
+
+            <div class="form-field">
+                <label>Reset password</label>
+                <InputText class="form-control" type="password" @bind-Value="_resetPassword" />
+            </div>
+
+            <button class="btn btn-outline-success" @onclick="ResetPasswordAsync" disabled="@_workingSelectedUser">
+                Apply new password
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(_selectedMessage))
+            {
+                <div class="@AlertClass(_selectedSucceeded)">@_selectedMessage</div>
+            }
+
+            <ul class="signal-list user-meta-list">
+                <li>Failed sign-in attempts: @_selectedUser.AccessFailedCount</li>
+                <li>Lockout end: @(_selectedUser.LockoutEndUtc?.ToLocalTime().ToString("g") ?? "Not locked")</li>
+            </ul>
+        }
+    </section>
+</div>
+
+@code {
+    private static readonly string[] AvailableRoles = ["Admin", "Ops", "Analyst"];
+
+    private readonly AdminUserCreateModel _createModel = new();
+    private readonly List<RoleToggle> _createRoleToggles = AvailableRoles.Select(role => new RoleToggle(role, role == "Analyst")).ToList();
+    private readonly List<RoleToggle> _selectedRoleToggles = AvailableRoles.Select(role => new RoleToggle(role)).ToList();
+
+    private PagedResponseModel<AdminUserSummaryModel>? _users;
+    private AdminUserSummaryModel? _selectedUser;
+    private string? _error;
+    private string? _createMessage;
+    private string? _selectedMessage;
+    private string _resetPassword = string.Empty;
+    private bool _createSucceeded;
+    private bool _selectedSucceeded;
+    private bool _isLoading = true;
+    private bool _submittingCreate;
+    private bool _workingSelectedUser;
+    private int _page = 1;
+    private const int _pageSize = 12;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _isLoading = true;
+            _error = null;
+            _users = await ApiClient.GetUsersAsync(_page, _pageSize);
+
+            if (_selectedUser is not null)
+            {
+                var refreshedSelection = _users.Items.FirstOrDefault(user => user.UserId == _selectedUser.UserId);
+                if (refreshedSelection is not null)
+                {
+                    SelectUser(refreshedSelection);
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task CreateUserAsync()
+    {
+        _submittingCreate = true;
+        _createMessage = null;
+
+        _createModel.Roles = SelectedRoles(_createRoleToggles);
+        if (_createModel.Roles.Count == 0)
+        {
+            _createSucceeded = false;
+            _createMessage = "Select at least one role for the new account.";
+            _submittingCreate = false;
+            return;
+        }
+
+        var result = await ApiClient.CreateUserAsync(_createModel);
+        _createSucceeded = result.Success;
+        _createMessage = result.Success ? "User account created successfully." : result.ErrorMessage;
+
+        if (result.Success)
+        {
+            _createModel.DisplayName = string.Empty;
+            _createModel.Email = string.Empty;
+            _createModel.Password = string.Empty;
+            ResetRoleSelection(_createRoleToggles, "Analyst");
+            await LoadAsync();
+        }
+
+        _submittingCreate = false;
+    }
+
+    private void SelectUser(AdminUserSummaryModel user)
+    {
+        _selectedUser = user;
+        _selectedMessage = null;
+        _selectedSucceeded = false;
+        _resetPassword = string.Empty;
+
+        foreach (var role in _selectedRoleToggles)
+        {
+            role.IsSelected = user.Roles.Contains(role.Name, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private async Task SaveRolesAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        var roles = SelectedRoles(_selectedRoleToggles);
+        if (roles.Count == 0)
+        {
+            _selectedSucceeded = false;
+            _selectedMessage = "Select at least one role before saving.";
+            return;
+        }
+
+        _workingSelectedUser = true;
+        var result = await ApiClient.UpdateUserRolesAsync(_selectedUser.UserId, roles);
+        _selectedSucceeded = result.Success;
+        _selectedMessage = result.Success ? "User roles updated." : result.ErrorMessage;
+
+        if (result.Success)
+        {
+            await LoadAsync();
+        }
+
+        _workingSelectedUser = false;
+    }
+
+    private async Task DisableSelectedUserAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        _workingSelectedUser = true;
+        var result = await ApiClient.DisableUserAsync(_selectedUser.UserId);
+        _selectedSucceeded = result.Success;
+        _selectedMessage = result.Success ? "User access disabled." : result.ErrorMessage;
+
+        if (result.Success)
+        {
+            await LoadAsync();
+        }
+
+        _workingSelectedUser = false;
+    }
+
+    private async Task EnableSelectedUserAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        _workingSelectedUser = true;
+        var result = await ApiClient.EnableUserAsync(_selectedUser.UserId);
+        _selectedSucceeded = result.Success;
+        _selectedMessage = result.Success ? "User access restored." : result.ErrorMessage;
+
+        if (result.Success)
+        {
+            await LoadAsync();
+        }
+
+        _workingSelectedUser = false;
+    }
+
+    private async Task ResetPasswordAsync()
+    {
+        if (_selectedUser is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_resetPassword))
+        {
+            _selectedSucceeded = false;
+            _selectedMessage = "Enter the replacement password before resetting.";
+            return;
+        }
+
+        _workingSelectedUser = true;
+        var result = await ApiClient.ResetPasswordAsync(_selectedUser.UserId, _resetPassword);
+        _selectedSucceeded = result.Success;
+        _selectedMessage = result.Success ? "Password reset applied successfully." : result.ErrorMessage;
+
+        if (result.Success)
+        {
+            _resetPassword = string.Empty;
+            await LoadAsync();
+        }
+
+        _workingSelectedUser = false;
+    }
+
+    private async Task HandlePageChangedAsync(int page)
+    {
+        _page = page;
+        await LoadAsync();
+    }
+
+    private bool IsSelected(AdminUserSummaryModel user) => _selectedUser?.UserId == user.UserId;
+
+    private static IReadOnlyCollection<string> SelectedRoles(IEnumerable<RoleToggle> toggles) =>
+        toggles.Where(role => role.IsSelected).Select(role => role.Name).ToArray();
+
+    private static void ResetRoleSelection(IEnumerable<RoleToggle> toggles, string defaultRole)
+    {
+        foreach (var role in toggles)
+        {
+            role.IsSelected = string.Equals(role.Name, defaultRole, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static string AlertClass(bool success) => success ? "alert alert-success" : "alert alert-danger";
+
+    private sealed class RoleToggle(string name, bool isSelected = false)
+    {
+        public string Name { get; } = name;
+        public bool IsSelected { get; set; } = isSelected;
+    }
+}

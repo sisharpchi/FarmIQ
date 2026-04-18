@@ -51,3 +51,22 @@ public sealed class ProcessingOptions
     public int PollIntervalSeconds { get; set; } = 5;
     public int LeaseDurationMinutes { get; set; } = 5;
 }
+
+public sealed class OpenAIOptions
+{
+    public const string SectionName = "OpenAI";
+    public bool Enabled { get; set; }
+    public string? ApiKey { get; set; }
+    public string BaseUrl { get; set; } = "https://api.openai.com/v1";
+    public string VisionModel { get; set; } = "gpt-4.1-mini";
+    public string TranscriptionModel { get; set; } = "gpt-4o-mini-transcribe";
+    public int TimeoutSeconds { get; set; } = 60;
+    public int MaxImagesPerRequest { get; set; } = 2;
+}
+
+public sealed class AuthOptions
+{
+    public const string SectionName = "Auth";
+    public bool EnablePublicSignup { get; set; }
+    public int AccessTokenLifetimeMinutes { get; set; } = 60;
+}
