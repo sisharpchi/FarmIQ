@@ -55,22 +55,24 @@ public sealed class MessageIngestionService(
 
         if (farmer is null)
         {
-            farmer = new FarmerProfile
-            {
-                ExternalFarmerId = command.ExternalUserId,
-                DisplayName = string.IsNullOrWhiteSpace(command.DisplayName) ? command.ExternalUserId : command.DisplayName,
-                PreferredLanguage = command.IncomingLanguage ?? "en",
-                Latitude = command.Latitude,
-                Longitude = command.Longitude,
-                TenantKey = command.TenantKey
-            };
+                farmer = new FarmerProfile
+                {
+                    ExternalFarmerId = command.ExternalUserId,
+                    DisplayName = string.IsNullOrWhiteSpace(command.DisplayName) ? command.ExternalUserId : command.DisplayName,
+                    PreferredLanguage = FarmLanguages.Normalize(command.IncomingLanguage),
+                    Latitude = command.Latitude,
+                    Longitude = command.Longitude,
+                    TenantKey = command.TenantKey
+                };
 
             await farmerRepository.AddAsync(farmer, cancellationToken);
         }
         else
         {
             farmer.DisplayName = string.IsNullOrWhiteSpace(command.DisplayName) ? farmer.DisplayName : command.DisplayName;
-            farmer.PreferredLanguage = command.IncomingLanguage ?? farmer.PreferredLanguage;
+            farmer.PreferredLanguage = string.IsNullOrWhiteSpace(command.IncomingLanguage)
+                ? farmer.PreferredLanguage
+                : FarmLanguages.Normalize(command.IncomingLanguage);
             if (command.HasLocation)
             {
                 farmer.Latitude = command.Latitude;
@@ -362,6 +364,7 @@ public sealed class AdvisoryWorkflowService(
             {
                 sourceLanguage = await languageService.DetectLanguageAsync(combinedText, cancellationToken);
             }
+            sourceLanguage = FarmLanguages.Normalize(sourceLanguage);
 
             var englishInput = await languageService.TranslateToEnglishAsync(combinedText, sourceLanguage!, cancellationToken);
             var analysis = await cropAnalysisService.AnalyzeAsync(englishInput, inboundMediaDtos, cancellationToken);
@@ -381,9 +384,10 @@ public sealed class AdvisoryWorkflowService(
                 ? await weatherService.GetSummaryAsync(farmer.Latitude, farmer.Longitude, cancellationToken)
                 : new WeatherSummaryDto();
 
-            var responseLanguage = string.IsNullOrWhiteSpace(farmer.PreferredLanguage)
-                ? sourceLanguage ?? "en"
-                : farmer.PreferredLanguage;
+            var responseLanguage = FarmLanguages.Normalize(
+                string.IsNullOrWhiteSpace(farmer.PreferredLanguage)
+                    ? sourceLanguage ?? FarmLanguages.English
+                    : farmer.PreferredLanguage);
 
             var advisoryText = BuildAdvisoryText(analysis, weather, farmer.Latitude.HasValue && farmer.Longitude.HasValue);
             var localizedAdvisory = await languageService.TranslateFromEnglishAsync(advisoryText, responseLanguage, cancellationToken);
@@ -856,6 +860,8 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             : 30;
         var openAiEnabled = bool.TryParse(configuration["OpenAI:Enabled"], out var enabled) && enabled;
         var openAiConfigured = openAiEnabled && !string.IsNullOrWhiteSpace(configuration["OpenAI:ApiKey"]);
+        var glmEnabled = bool.TryParse(configuration["Glm:Enabled"], out var glmFlag) && glmFlag;
+        var glmConfigured = glmEnabled && !string.IsNullOrWhiteSpace(configuration["Glm:ApiKey"]);
         return Task.FromResult(new AdminSystemStatusDto(
             ApiHealthy: true,
             DatabaseConfigured: !string.IsNullOrWhiteSpace(connectionString),
@@ -868,6 +874,7 @@ public sealed class AdminQueryService(IUnitOfWork unitOfWork, IBackgroundJobQueu
             PublicSignupEnabled: publicSignupEnabled,
             WorkerPollIntervalSeconds: workerPollIntervalSeconds,
             OpenAiConfigured: openAiConfigured,
+            GlmConfigured: glmConfigured,
             ServerUtc: DateTime.UtcNow));
     }
 

@@ -49,8 +49,15 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<OpenAIOptions>()
             .Bind(configuration.GetSection(OpenAIOptions.SectionName))
             .Validate(x => !x.Enabled || !string.IsNullOrWhiteSpace(x.ApiKey), "OpenAI ApiKey is required when OpenAI is enabled.")
-            .Validate(x => !x.Enabled || (!string.IsNullOrWhiteSpace(x.VisionModel) && !string.IsNullOrWhiteSpace(x.TranscriptionModel)), "OpenAI model names are required when OpenAI is enabled.")
+            .Validate(x => !x.Enabled || (!string.IsNullOrWhiteSpace(x.VisionModel) && !string.IsNullOrWhiteSpace(x.TranscriptionModel) && !string.IsNullOrWhiteSpace(x.LanguageModel)), "OpenAI model names are required when OpenAI is enabled.")
             .Validate(x => x.TimeoutSeconds > 0 && x.MaxImagesPerRequest > 0, "OpenAI options must be positive.")
+            .ValidateOnStart();
+        services.AddOptions<GlmOptions>()
+            .Bind(configuration.GetSection(GlmOptions.SectionName))
+            .Validate(x => !x.Enabled || !string.IsNullOrWhiteSpace(x.ApiKey), "Glm ApiKey is required when GLM is enabled.")
+            .Validate(x => !x.Enabled || !string.IsNullOrWhiteSpace(x.Model), "Glm model name is required when GLM is enabled.")
+            .Validate(x => !x.Enabled || !string.IsNullOrWhiteSpace(x.BaseUrl), "Glm base URL is required when GLM is enabled.")
+            .Validate(x => x.TimeoutSeconds > 0, "Glm timeout must be positive.")
             .ValidateOnStart();
         services.AddOptions<AuthOptions>()
             .Bind(configuration.GetSection(AuthOptions.SectionName))
@@ -118,6 +125,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient(nameof(OpenWeatherMapService));
         services.AddHttpClient(nameof(OpenAiCropAnalysisService));
         services.AddHttpClient(nameof(OpenAiSpeechToTextService));
+        services.AddHttpClient(nameof(FarmLanguageService));
+        services.AddHttpClient(nameof(GlmChatClient));
 
         services.AddScoped<IUnitOfWork, UnitOfWork>();
         services.AddScoped<IMessageIngestionService, MessageIngestionService>();
@@ -136,8 +145,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<IMediaStorageService, LocalMediaStorageService>();
         services.AddScoped<ISpeechToTextService, OpenAiSpeechToTextService>();
-        services.AddScoped<ILanguageService, MockLanguageService>();
-        services.AddScoped<ICropAnalysisService, OpenAiCropAnalysisService>();
+        services.AddScoped<GlmChatClient>();
+        services.AddScoped<GlmCropAnalysisService>();
+        services.AddScoped<OpenAiCropAnalysisService>();
+        services.AddScoped<ILanguageService, FarmLanguageService>();
+        services.AddScoped<ICropAnalysisService, FarmCropAnalysisService>();
         services.AddScoped<IWeatherService, OpenWeatherMapService>();
 
         services.AddScoped<IMessageChannelService, WhatsAppService>();
@@ -209,6 +221,7 @@ internal sealed class ConfigurationValidationStartupFilter : IStartupFilter
             _ = app.ApplicationServices.GetRequiredService<IOptions<WebhookOptions>>().Value;
             _ = app.ApplicationServices.GetRequiredService<IOptions<ProcessingOptions>>().Value;
             _ = app.ApplicationServices.GetRequiredService<IOptions<OpenAIOptions>>().Value;
+            _ = app.ApplicationServices.GetRequiredService<IOptions<GlmOptions>>().Value;
             _ = app.ApplicationServices.GetRequiredService<IOptions<AuthOptions>>().Value;
             var configuration = app.ApplicationServices.GetRequiredService<IConfiguration>();
             if (string.IsNullOrWhiteSpace(configuration.GetConnectionString("DefaultConnection")))

@@ -3,38 +3,39 @@
 @implements IDisposable
 @inject FarmAdminApiClient ApiClient
 @inject RefreshCoordinator RefreshCoordinator
+@inject AdminLocalizer Localizer
 
-<PageTitle>Deliveries | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Deliveries"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>Deliveries</h1>
+<h1>@Localizer["Deliveries"]</h1>
 
-<DataState IsLoading="@_isLoading" IsEmpty="@(_issues is not null && _issues.Items.Count == 0)" Error="@_error" LoadingText="Loading delivery issues..." EmptyText="No duplicate or problematic deliveries found." />
+<DataState IsLoading="@_isLoading" IsEmpty="@(_issues is not null && _issues.Items.Count == 0)" Error="@_error" LoadingText="@(Localizer["Loading delivery issues..."])" EmptyText="@(Localizer["No duplicate or problematic deliveries found."])" />
 
 @if (_issues is not null && string.IsNullOrWhiteSpace(_error))
 {
-    <section class="panel-card">
+        <section class="panel-card">
         <div class="table-tools">
-            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+            <button class="btn btn-outline-success" @onclick="LoadAsync">@Localizer["Refresh"]</button>
         </div>
         <table class="table table-darkless">
             <thead>
                 <tr>
-                    <th>Channel</th>
-                    <th>External message</th>
-                    <th>Duplicate</th>
-                    <th>Linked inbound</th>
-                    <th>Created</th>
+                    <th>@Localizer["Channel"]</th>
+                    <th>@Localizer["External message"]</th>
+                    <th>@Localizer["Duplicate"]</th>
+                    <th>@Localizer["Linked inbound"]</th>
+                    <th>@Localizer["Created"]</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach (var issue in _issues.Items)
                 {
                     <tr>
-                        <td>@issue.ChannelType</td>
+                        <td>@Localizer.Channel(issue.ChannelType)</td>
                         <td>@issue.ExternalMessageId</td>
-                        <td>@issue.IsDuplicate</td>
+                        <td>@Localizer.Bool(issue.IsDuplicate)</td>
                         <td>@issue.InboundMessageId</td>
-                        <td>@issue.CreatedUtc.ToLocalTime().ToString("g")</td>
+                        <td>@Localizer.FormatDateTime(issue.CreatedUtc.ToLocalTime())</td>
                     </tr>
                 }
             </tbody>

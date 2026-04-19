@@ -8,5 +8,17 @@ window.farmiqAuth = {
     },
     clearSession: function (key) {
         sessionStorage.removeItem(key);
+    },
+    saveValue: function (key, value) {
+        sessionStorage.setItem(key, value);
+    },
+    loadValue: function (key) {
+        return sessionStorage.getItem(key);
+    },
+    removeValue: function (key) {
+        sessionStorage.removeItem(key);
+    },
+    setDocumentLanguage: function (value) {
+        document.documentElement.lang = value || "en";
     }
 };

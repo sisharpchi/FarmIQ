@@ -105,7 +105,8 @@ public sealed class FarmAuthStateProvider(BrowserSessionStore sessionStore) : Au
 public sealed class AuthService(
     IConfiguration configuration,
     BrowserSessionStore sessionStore,
-    FarmAuthStateProvider authStateProvider) : IAuthService
+    FarmAuthStateProvider authStateProvider,
+    AdminLocalizer localizer) : IAuthService
 {
     private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7127";
 
@@ -113,7 +114,7 @@ public sealed class AuthService(
     {
         try
         {
-            using var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
+            using var client = CreateClient();
             using var form = new FormUrlEncodedContent(new Dictionary<string, string>
             {
                 ["grant_type"] = "password",
@@ -130,20 +131,20 @@ public sealed class AuthService(
             var token = await tokenResponse.Content.ReadFromJsonAsync<TokenResponse>();
             if (token is null || string.IsNullOrWhiteSpace(token.AccessToken))
             {
-                return (false, "Token response was empty.");
+                return (false, localizer["Token response was empty."]);
             }
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
             var sessionResponse = await client.GetAsync("/api/admin/session");
             if (!sessionResponse.IsSuccessStatusCode)
             {
-                return (false, "Unable to load admin session.");
+                return (false, localizer["Unable to load admin session."]);
             }
 
             var user = await sessionResponse.Content.ReadFromJsonAsync<UserSessionModel>();
             if (user is null)
             {
-                return (false, "Unable to read admin session.");
+                return (false, localizer["Unable to read admin session."]);
             }
 
             var session = new AuthSessionModel
@@ -158,7 +159,7 @@ public sealed class AuthService(
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -166,12 +167,12 @@ public sealed class AuthService(
     {
         try
         {
-            using var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
+            using var client = CreateClient();
             var response = await client.PostAsJsonAsync("/api/auth/signup", request);
             if (!response.IsSuccessStatusCode)
             {
                 var problem = await response.Content.ReadAsStringAsync();
-                return (false, string.IsNullOrWhiteSpace(problem) ? "Unable to create your account." : problem.Trim('"'));
+                return (false, string.IsNullOrWhiteSpace(problem) ? localizer["The request could not be completed."] : localizer.NormalizeApiMessage(null, problem));
             }
 
             return await LoginAsync(new LoginRequestModel
@@ -182,7 +183,7 @@ public sealed class AuthService(
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -209,46 +210,37 @@ public sealed class AuthService(
         return session;
     }
 
-    private static async Task<string> ReadErrorMessageAsync(HttpResponseMessage response)
+    private HttpClient CreateClient()
+    {
+        var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd(localizer.CurrentLanguage);
+        return client;
+    }
+
+    private async Task<string> ReadErrorMessageAsync(HttpResponseMessage response)
     {
         var raw = await response.Content.ReadAsStringAsync();
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return "Email or password was invalid.";
+            return localizer["Email or password was invalid."];
         }
 
         try
         {
             var problem = JsonSerializer.Deserialize<ApiErrorModel>(raw);
-            if (!string.IsNullOrWhiteSpace(problem?.ErrorDescription))
-            {
-                return problem.ErrorDescription;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Detail))
-            {
-                return problem.Detail;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Title))
-            {
-                return problem.Title;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Error))
-            {
-                return problem.Error;
-            }
+            return localizer.NormalizeApiMessage(
+                problem?.Error,
+                problem?.ErrorDescription ?? problem?.Detail ?? problem?.Title ?? problem?.Error ?? raw);
         }
         catch (JsonException)
         {
         }
 
-        return raw.Trim().Trim('"');
+        return localizer.NormalizeApiMessage(null, raw.Trim().Trim('"'));
     }
 }
 
-public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthService authService)
+public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthService authService, AdminLocalizer localizer)
 {
     private readonly string _apiBaseUrl = configuration["Api:BaseUrl"] ?? "https://localhost:7127";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -314,7 +306,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -326,7 +318,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -338,7 +330,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -353,7 +345,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
@@ -368,13 +360,13 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         }
         catch (HttpRequestException)
         {
-            return (false, "FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct.");
+            return (false, localizer["FarmIQ API is unavailable. Confirm the API is running and the admin BaseUrl is correct."]);
         }
     }
 
     public async Task<bool> IsApiHealthyAsync()
     {
-        using var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
+        using var client = CreateClient(string.Empty);
         var response = await client.GetAsync("/health/ready");
         return response.StatusCode == HttpStatusCode.OK;
     }
@@ -392,7 +384,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             await authService.LogoutAsync();
-            throw new UnauthorizedAccessException("Your admin session expired. Please sign in again.");
+            throw new UnauthorizedAccessException(localizer["Your admin session expired. Please sign in again."]);
         }
 
         response.EnsureSuccessStatusCode();
@@ -404,7 +396,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         var session = await authService.GetSessionAsync();
         if (session is null)
         {
-            return (false, "Your admin session expired. Please sign in again.");
+            return (false, localizer["Your admin session expired. Please sign in again."]);
         }
 
         using var client = CreateClient(session.AccessToken);
@@ -412,7 +404,7 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             await authService.LogoutAsync();
-            return (false, "Your admin session expired. Please sign in again.");
+            return (false, localizer["Your admin session expired. Please sign in again."]);
         }
 
         if (response.IsSuccessStatusCode)
@@ -424,48 +416,37 @@ public sealed class FarmAdminApiClient(IConfiguration configuration, IAuthServic
         return (false, error);
     }
 
-    private static async Task<string> ReadErrorAsync(HttpResponseMessage response)
+    private async Task<string> ReadErrorAsync(HttpResponseMessage response)
     {
         var raw = await response.Content.ReadAsStringAsync();
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return "The request could not be completed.";
+            return localizer["The request could not be completed."];
         }
 
         try
         {
             var problem = JsonSerializer.Deserialize<ApiErrorModel>(raw, JsonOptions);
-            if (!string.IsNullOrWhiteSpace(problem?.ErrorDescription))
-            {
-                return problem.ErrorDescription;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Detail))
-            {
-                return problem.Detail;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Title))
-            {
-                return problem.Title;
-            }
-
-            if (!string.IsNullOrWhiteSpace(problem?.Error))
-            {
-                return problem.Error;
-            }
+            return localizer.NormalizeApiMessage(
+                problem?.Error,
+                problem?.ErrorDescription ?? problem?.Detail ?? problem?.Title ?? problem?.Error ?? raw);
         }
         catch (JsonException)
         {
         }
 
-        return raw.Trim().Trim('"');
+        return localizer.NormalizeApiMessage(null, raw.Trim().Trim('"'));
     }
 
     private HttpClient CreateClient(string accessToken)
     {
         var client = new HttpClient { BaseAddress = new Uri(_apiBaseUrl) };
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        if (!string.IsNullOrWhiteSpace(accessToken))
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        }
+
+        client.DefaultRequestHeaders.AcceptLanguage.ParseAdd(localizer.CurrentLanguage);
         return client;
     }
 }

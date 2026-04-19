@@ -1,41 +1,42 @@
 @page "/users"
 @attribute [RouteAccess("Admin")]
 @inject FarmAdminApiClient ApiClient
+@inject AdminLocalizer Localizer
 
-<PageTitle>Users | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Users"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>Users</h1>
+<h1>@Localizer["Users"]</h1>
 
 <div class="page-grid">
     <section class="panel-card">
-        <h2>Create account</h2>
+        <h2>@Localizer["Create account"]</h2>
 
         <EditForm Model="_createModel" OnValidSubmit="CreateUserAsync">
             <DataAnnotationsValidator />
 
             <div class="form-field">
-                <label>Display name</label>
+                <label>@Localizer["Display name"]</label>
                 <InputText class="form-control" @bind-Value="_createModel.DisplayName" />
             </div>
 
             <div class="form-field">
-                <label>Email</label>
+                <label>@Localizer["Email"]</label>
                 <InputText class="form-control" @bind-Value="_createModel.Email" />
             </div>
 
             <div class="form-field">
-                <label>Initial password</label>
+                <label>@Localizer["Initial password"]</label>
                 <InputText class="form-control" type="password" @bind-Value="_createModel.Password" />
             </div>
 
             <div class="form-field">
-                <label>Roles</label>
+                <label>@Localizer["Roles"]</label>
                 <div class="role-grid">
                     @foreach (var role in _createRoleToggles)
                     {
                         <label class="role-pill">
                             <input type="checkbox" @bind="role.IsSelected" />
-                            <span>@role.Name</span>
+                            <span>@Localizer.Role(role.Name)</span>
                         </label>
                     }
                 </div>
@@ -47,27 +48,27 @@
             }
 
             <button class="btn btn-success" type="submit" disabled="@_submittingCreate">
-                @(_submittingCreate ? "Creating..." : "Create user")
+                @(_submittingCreate ? Localizer["Creating..."] : Localizer["Create user"])
             </button>
         </EditForm>
 
         <hr />
 
         <div class="table-tools">
-            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+            <button class="btn btn-outline-success" @onclick="LoadAsync">@Localizer["Refresh"]</button>
         </div>
 
-        <DataState IsLoading="@_isLoading" IsEmpty="@(_users is not null && _users.Items.Count == 0)" Error="@_error" LoadingText="Loading admin users..." EmptyText="No admin users were found." />
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_users is not null && _users.Items.Count == 0)" Error="@_error" LoadingText="@(Localizer["Loading admin users..."])" EmptyText="@(Localizer["No admin users were found."])" />
 
         @if (_users is not null && string.IsNullOrWhiteSpace(_error))
         {
             <table class="table table-darkless">
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Roles</th>
-                        <th>Status</th>
+                        <th>@Localizer["Name"]</th>
+                        <th>@Localizer["Email"]</th>
+                        <th>@Localizer["Roles"]</th>
+                        <th>@Localizer["Status"]</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -77,10 +78,10 @@
                         <tr class="@(IsSelected(user) ? "table-active" : null)">
                             <td>@user.DisplayName</td>
                             <td>@user.Email</td>
-                            <td>@string.Join(", ", user.Roles)</td>
-                            <td>@(user.IsEnabled ? "Enabled" : "Disabled")</td>
+                            <td>@string.Join(", ", user.Roles.Select(Localizer.Role))</td>
+                            <td>@CurrentStatusText(user.IsEnabled)</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-success" @onclick="() => SelectUser(user)">Manage</button>
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => SelectUser(user)">@Localizer["Manage"]</button>
                             </td>
                         </tr>
                     }
@@ -92,53 +93,53 @@
     </section>
 
     <section class="panel-card">
-        <h2>User controls</h2>
+        <h2>@Localizer["User controls"]</h2>
 
         @if (_selectedUser is null)
         {
-            <p>Select a user to adjust roles, disable access, or issue a new password.</p>
+            <p>@SelectUserText()</p>
         }
         else
         {
             <div class="detail-meta">
                 <strong>@_selectedUser.DisplayName</strong>
-                <span>@(_selectedUser.IsEnabled ? "Enabled" : "Disabled")</span>
+                <span>@CurrentStatusText(_selectedUser.IsEnabled)</span>
             </div>
 
             <p class="subtle-copy user-detail-copy">@_selectedUser.Email</p>
 
             <div class="form-field">
-                <label>Roles</label>
+                <label>@Localizer["Roles"]</label>
                 <div class="role-grid">
                     @foreach (var role in _selectedRoleToggles)
                     {
                         <label class="role-pill">
                             <input type="checkbox" @bind="role.IsSelected" />
-                            <span>@role.Name</span>
+                            <span>@Localizer.Role(role.Name)</span>
                         </label>
                     }
                 </div>
             </div>
 
             <div class="action-row">
-                <button class="btn btn-outline-success" @onclick="SaveRolesAsync" disabled="@_workingSelectedUser">Save roles</button>
+                <button class="btn btn-outline-success" @onclick="SaveRolesAsync" disabled="@_workingSelectedUser">@Localizer["Save roles"]</button>
                 @if (_selectedUser.IsEnabled)
                 {
-                    <button class="btn btn-outline-danger" @onclick="DisableSelectedUserAsync" disabled="@_workingSelectedUser">Disable access</button>
+                    <button class="btn btn-outline-danger" @onclick="DisableSelectedUserAsync" disabled="@_workingSelectedUser">@Localizer["Disable access"]</button>
                 }
                 else
                 {
-                    <button class="btn btn-success" @onclick="EnableSelectedUserAsync" disabled="@_workingSelectedUser">Enable access</button>
+                    <button class="btn btn-success" @onclick="EnableSelectedUserAsync" disabled="@_workingSelectedUser">@Localizer["Enable access"]</button>
                 }
             </div>
 
             <div class="form-field">
-                <label>Reset password</label>
+                <label>@Localizer["Reset password"]</label>
                 <InputText class="form-control" type="password" @bind-Value="_resetPassword" />
             </div>
 
             <button class="btn btn-outline-success" @onclick="ResetPasswordAsync" disabled="@_workingSelectedUser">
-                Apply new password
+                @Localizer["Apply new password"]
             </button>
 
             @if (!string.IsNullOrWhiteSpace(_selectedMessage))
@@ -147,8 +148,8 @@
             }
 
             <ul class="signal-list user-meta-list">
-                <li>Failed sign-in attempts: @_selectedUser.AccessFailedCount</li>
-                <li>Lockout end: @(_selectedUser.LockoutEndUtc?.ToLocalTime().ToString("g") ?? "Not locked")</li>
+                <li>@UserMetaLine("Failed sign-in attempts", _selectedUser.AccessFailedCount.ToString())</li>
+                <li>@UserMetaLine("Lockout end", _selectedUser.LockoutEndUtc.HasValue ? Localizer.FormatDateTime(_selectedUser.LockoutEndUtc.Value.ToLocalTime()) : NotLockedText())</li>
             </ul>
         }
     </section>
@@ -213,14 +214,14 @@
         if (_createModel.Roles.Count == 0)
         {
             _createSucceeded = false;
-            _createMessage = "Select at least one role for the new account.";
+            _createMessage = SelectRoleForNewUserText();
             _submittingCreate = false;
             return;
         }
 
         var result = await ApiClient.CreateUserAsync(_createModel);
         _createSucceeded = result.Success;
-        _createMessage = result.Success ? "User account created successfully." : result.ErrorMessage;
+        _createMessage = result.Success ? UserCreatedText() : result.ErrorMessage;
 
         if (result.Success)
         {
@@ -258,14 +259,14 @@
         if (roles.Count == 0)
         {
             _selectedSucceeded = false;
-            _selectedMessage = "Select at least one role before saving.";
+            _selectedMessage = SelectRoleBeforeSavingText();
             return;
         }
 
         _workingSelectedUser = true;
         var result = await ApiClient.UpdateUserRolesAsync(_selectedUser.UserId, roles);
         _selectedSucceeded = result.Success;
-        _selectedMessage = result.Success ? "User roles updated." : result.ErrorMessage;
+        _selectedMessage = result.Success ? UserRolesUpdatedText() : result.ErrorMessage;
 
         if (result.Success)
         {
@@ -285,7 +286,7 @@
         _workingSelectedUser = true;
         var result = await ApiClient.DisableUserAsync(_selectedUser.UserId);
         _selectedSucceeded = result.Success;
-        _selectedMessage = result.Success ? "User access disabled." : result.ErrorMessage;
+        _selectedMessage = result.Success ? UserDisabledText() : result.ErrorMessage;
 
         if (result.Success)
         {
@@ -305,7 +306,7 @@
         _workingSelectedUser = true;
         var result = await ApiClient.EnableUserAsync(_selectedUser.UserId);
         _selectedSucceeded = result.Success;
-        _selectedMessage = result.Success ? "User access restored." : result.ErrorMessage;
+        _selectedMessage = result.Success ? UserEnabledText() : result.ErrorMessage;
 
         if (result.Success)
         {
@@ -325,14 +326,14 @@
         if (string.IsNullOrWhiteSpace(_resetPassword))
         {
             _selectedSucceeded = false;
-            _selectedMessage = "Enter the replacement password before resetting.";
+            _selectedMessage = EnterReplacementPasswordText();
             return;
         }
 
         _workingSelectedUser = true;
         var result = await ApiClient.ResetPasswordAsync(_selectedUser.UserId, _resetPassword);
         _selectedSucceeded = result.Success;
-        _selectedMessage = result.Success ? "Password reset applied successfully." : result.ErrorMessage;
+        _selectedMessage = result.Success ? PasswordResetText() : result.ErrorMessage;
 
         if (result.Success)
         {
@@ -361,6 +362,100 @@
             role.IsSelected = string.Equals(role.Name, defaultRole, StringComparison.OrdinalIgnoreCase);
         }
     }
+
+    private string SelectUserText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Выберите пользователя, чтобы изменить роли, отключить доступ или выдать новый пароль.",
+        FarmLanguages.Uzbek => "Rollarni o'zgartirish, kirishni o'chirish yoki yangi parol berish uchun foydalanuvchini tanlang.",
+        _ => "Select a user to adjust roles, disable access, or issue a new password."
+    };
+
+    private string SelectRoleForNewUserText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Выберите хотя бы одну роль для нового аккаунта.",
+        FarmLanguages.Uzbek => "Yangi hisob uchun kamida bitta rol tanlang.",
+        _ => "Select at least one role for the new account."
+    };
+
+    private string UserCreatedText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Аккаунт пользователя успешно создан.",
+        FarmLanguages.Uzbek => "Foydalanuvchi hisobi muvaffaqiyatli yaratildi.",
+        _ => "User account created successfully."
+    };
+
+    private string SelectRoleBeforeSavingText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Перед сохранением выберите хотя бы одну роль.",
+        FarmLanguages.Uzbek => "Saqlashdan oldin kamida bitta rol tanlang.",
+        _ => "Select at least one role before saving."
+    };
+
+    private string UserRolesUpdatedText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Роли пользователя обновлены.",
+        FarmLanguages.Uzbek => "Foydalanuvchi rollari yangilandi.",
+        _ => "User roles updated."
+    };
+
+    private string UserDisabledText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Доступ пользователя отключён.",
+        FarmLanguages.Uzbek => "Foydalanuvchi kirishi o'chirildi.",
+        _ => "User access disabled."
+    };
+
+    private string UserEnabledText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Доступ пользователя восстановлен.",
+        FarmLanguages.Uzbek => "Foydalanuvchi kirishi qayta yoqildi.",
+        _ => "User access restored."
+    };
+
+    private string EnterReplacementPasswordText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Введите новый пароль перед сбросом.",
+        FarmLanguages.Uzbek => "Reset qilishdan oldin yangi parolni kiriting.",
+        _ => "Enter the replacement password before resetting."
+    };
+
+    private string PasswordResetText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Пароль успешно сброшен.",
+        FarmLanguages.Uzbek => "Parol muvaffaqiyatli yangilandi.",
+        _ => "Password reset applied successfully."
+    };
+
+    private string UserMetaLine(string label, string value) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => label switch
+        {
+            "Failed sign-in attempts" => $"Неудачные попытки входа: {value}",
+            "Lockout end" => $"Блокировка до: {value}",
+            _ => $"{label}: {value}"
+        },
+        FarmLanguages.Uzbek => label switch
+        {
+            "Failed sign-in attempts" => $"Muvaffaqiyatsiz kirishlar: {value}",
+            "Lockout end" => $"Lockout tugashi: {value}",
+            _ => $"{label}: {value}"
+        },
+        _ => $"{label}: {value}"
+    };
+
+    private string NotLockedText() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Не заблокирован",
+        FarmLanguages.Uzbek => "Lock qilinmagan",
+        _ => "Not locked"
+    };
+
+    private string CurrentStatusText(bool enabled) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => enabled ? "Включён" : "Отключён",
+        FarmLanguages.Uzbek => enabled ? "Yoqilgan" : "O'chirilgan",
+        _ => enabled ? "Enabled" : "Disabled"
+    };
 
     private static string AlertClass(bool success) => success ? "alert alert-success" : "alert alert-danger";
 

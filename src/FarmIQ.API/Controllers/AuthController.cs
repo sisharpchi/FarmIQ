@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using FarmIQ.Infrastructure.Configuration;
 using FarmIQ.Infrastructure.Identity;
@@ -25,7 +26,10 @@ public sealed class AuthController(
             return StatusCode(StatusCodes.Status403Forbidden, new
             {
                 error = "public_signup_disabled",
-                error_description = "Public signup is disabled. Ask an existing admin to create your account."
+                error_description = Translate(
+                    "Public signup is disabled. Ask an existing admin to create your account.",
+                    "Публичная регистрация отключена. Попросите существующего администратора создать вам аккаунт.",
+                    "Public signup o'chirilgan. Hisob ochish uchun mavjud adminga murojaat qiling.")
             });
         }
 
@@ -38,7 +42,10 @@ public sealed class AuthController(
         var existing = await userManager.FindByEmailAsync(email);
         if (existing is not null)
         {
-            return Conflict("An account with that email already exists.");
+            return Conflict(Translate(
+                "An account with that email already exists.",
+                "Аккаунт с таким email уже существует.",
+                "Bu email bilan hisob allaqachon mavjud."));
         }
 
         const string defaultRole = "Analyst";
@@ -85,7 +92,10 @@ public sealed class AuthController(
             return BadRequest(new
             {
                 error = "invalid_request",
-                error_description = "Token requests must use form content."
+                error_description = Translate(
+                    "Token requests must use form content.",
+                    "Token-запросы должны использовать form content.",
+                    "Token so'rovlari form content bilan yuborilishi kerak.")
             });
         }
 
@@ -100,7 +110,10 @@ public sealed class AuthController(
             return BadRequest(new
             {
                 error = "invalid_request",
-                error_description = "Token request form payload could not be read."
+                error_description = Translate(
+                    "Token request form payload could not be read.",
+                    "Не удалось прочитать form payload token-запроса.",
+                    "Token so'rovining form payload'ini o'qib bo'lmadi.")
             });
         }
 
@@ -124,7 +137,10 @@ public sealed class AuthController(
             return BadRequest(new
             {
                 error = "account_disabled",
-                error_description = "This FarmIQ admin account is disabled or locked."
+                error_description = Translate(
+                    "This FarmIQ admin account is disabled or locked.",
+                    "Этот FarmIQ admin аккаунт отключён или заблокирован.",
+                    "Bu FarmIQ admin hisobi o'chirilgan yoki bloklangan.")
             });
         }
 
@@ -134,7 +150,10 @@ public sealed class AuthController(
             return BadRequest(new
             {
                 error = "account_disabled",
-                error_description = "This FarmIQ admin account is disabled or locked."
+                error_description = Translate(
+                    "This FarmIQ admin account is disabled or locked.",
+                    "Этот FarmIQ admin аккаунт отключён или заблокирован.",
+                    "Bu FarmIQ admin hisobi o'chirilgan yoki bloklangan.")
             });
         }
 
@@ -179,6 +198,14 @@ public sealed class AuthController(
         return contentType.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase)
             || contentType.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string Translate(string english, string russian, string uzbek) =>
+        CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+        {
+            "ru" => russian,
+            "uz" => uzbek,
+            _ => english
+        };
 
     public sealed class SignUpRequest
     {

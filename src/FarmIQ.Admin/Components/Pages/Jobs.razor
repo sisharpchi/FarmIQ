@@ -3,36 +3,37 @@
 @implements IDisposable
 @inject FarmAdminApiClient ApiClient
 @inject RefreshCoordinator RefreshCoordinator
+@inject AdminLocalizer Localizer
 
-<PageTitle>Jobs | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Jobs"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>Jobs</h1>
+<h1>@Localizer["Jobs"]</h1>
 
 <div class="page-grid">
     <section class="panel-card">
         <div class="table-tools">
             <select class="form-select narrow-select" @bind="_selectedStatus">
-                <option value="">All</option>
+                <option value="">@Localizer["All"]</option>
                 @foreach (var status in Enum.GetValues<ProcessingJobStatus>())
                 {
-                    <option value="@status">@status</option>
+                    <option value="@status">@Localizer.JobStatus(status)</option>
                 }
             </select>
-            <button class="btn btn-outline-success" @onclick="LoadAsync">Apply</button>
+            <button class="btn btn-outline-success" @onclick="LoadAsync">@Localizer["Apply"]</button>
         </div>
 
-        <DataState IsLoading="@_isLoading" IsEmpty="@(_jobs is not null && _jobs.Items.Count == 0)" Error="@_error" LoadingText="Loading jobs..." EmptyText="No jobs matched this filter." />
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_jobs is not null && _jobs.Items.Count == 0)" Error="@_error" LoadingText="@(Localizer["Loading jobs..."])" EmptyText="@(Localizer["No jobs matched this filter."])" />
 
         @if (_jobs is not null && string.IsNullOrWhiteSpace(_error))
         {
             <table class="table table-darkless">
                 <thead>
                     <tr>
-                        <th>Status</th>
-                        <th>Attempts</th>
-                        <th>Scheduled</th>
-                        <th>Next attempt</th>
-                        <th>Error</th>
+                        <th>@Localizer["Status"]</th>
+                        <th>@Localizer["Attempts"]</th>
+                        <th>@Localizer["Scheduled"]</th>
+                        <th>@Localizer["Next attempt"]</th>
+                        <th>@Localizer["Error"]</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -40,15 +41,15 @@
                     @foreach (var job in _jobs.Items)
                     {
                         <tr>
-                            <td>@job.Status</td>
+                            <td>@Localizer.JobStatus(job.Status)</td>
                             <td>@job.Attempts</td>
-                            <td>@job.ScheduledUtc.ToLocalTime().ToString("g")</td>
-                            <td>@(job.NextAttemptUtc?.ToLocalTime().ToString("g") ?? "n/a")</td>
+                            <td>@Localizer.FormatDateTime(job.ScheduledUtc.ToLocalTime())</td>
+                            <td>@(job.NextAttemptUtc.HasValue ? Localizer.FormatDateTime(job.NextAttemptUtc.Value.ToLocalTime()) : Localizer["Not available"])</td>
                             <td>@job.LastError</td>
                             <td>
                                 @if (job.Status == ProcessingJobStatus.Failed || job.Status == ProcessingJobStatus.Retrying)
                                 {
-                                    <button class="btn btn-sm btn-success" @onclick="() => RetryAsync(job.JobId)">Retry</button>
+                                    <button class="btn btn-sm btn-success" @onclick="() => RetryAsync(job.JobId)">@Localizer["Retry"]</button>
                                 }
                             </td>
                         </tr>
@@ -61,21 +62,21 @@
     </section>
 
     <section class="panel-card">
-        <h2>Stuck jobs</h2>
+        <h2>@Localizer["Stuck jobs"]</h2>
         @if (_stuckJobs is null)
         {
-            <p>Loading stuck jobs...</p>
+            <p>@Localizer["Loading stuck jobs..."]</p>
         }
         else if (_stuckJobs.Items.Count == 0)
         {
-            <p>No stuck jobs right now.</p>
+            <p>@Localizer["No stuck jobs right now."]</p>
         }
         else
         {
             <ul class="signal-list">
                 @foreach (var job in _stuckJobs.Items)
                 {
-                    <li>@job.JobId | lease @job.LeaseExpiresUtc?.ToLocalTime().ToString("g") | attempts @job.Attempts | error @job.LastError</li>
+                    <li>@StuckJobLabel(job)</li>
                 }
             </ul>
         }
@@ -132,6 +133,13 @@
         _page = page;
         await LoadAsync();
     }
+
+    private string StuckJobLabel(StuckJobSummaryModel job) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => $"{job.JobId} | lease {Localizer.FormatNullableDateTime(job.LeaseExpiresUtc?.ToLocalTime())} | попыток {job.Attempts} | ошибка {job.LastError}",
+        FarmLanguages.Uzbek => $"{job.JobId} | lease {Localizer.FormatNullableDateTime(job.LeaseExpiresUtc?.ToLocalTime())} | urinishlar {job.Attempts} | xato {job.LastError}",
+        _ => $"{job.JobId} | lease {Localizer.FormatNullableDateTime(job.LeaseExpiresUtc?.ToLocalTime())} | attempts {job.Attempts} | error {job.LastError}"
+    };
 
     public void Dispose() => _pollingHandle?.Dispose();
 }

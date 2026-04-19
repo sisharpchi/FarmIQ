@@ -1,3 +1,21 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 
-@Body
+<div class="empty-layout">
+    <header class="empty-layout-header">
+        <LanguageSwitcher />
+    </header>
+    <main class="empty-layout-body">
+        @Body
+    </main>
+</div>
+
+@code {
+    [Inject] private AdminLocalizer Localizer { get; set; } = default!;
+
+    protected override void OnInitialized() => Localizer.Changed += HandleLanguageChanged;
+
+    public void Dispose() => Localizer.Changed -= HandleLanguageChanged;
+
+    private void HandleLanguageChanged() => InvokeAsync(StateHasChanged);
+}

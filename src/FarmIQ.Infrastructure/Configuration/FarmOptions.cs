@@ -65,9 +65,20 @@ public sealed class OpenAIOptions
     public string? ApiKey { get; set; }
     public string BaseUrl { get; set; } = "https://api.openai.com/v1";
     public string VisionModel { get; set; } = "gpt-4.1-mini";
+    public string LanguageModel { get; set; } = "gpt-4.1-mini";
     public string TranscriptionModel { get; set; } = "gpt-4o-mini-transcribe";
     public int TimeoutSeconds { get; set; } = 60;
     public int MaxImagesPerRequest { get; set; } = 2;
+}
+
+public sealed class GlmOptions
+{
+    public const string SectionName = "Glm";
+    public bool Enabled { get; set; }
+    public string? ApiKey { get; set; }
+    public string BaseUrl { get; set; } = "https://open.bigmodel.cn/api/coding/paas/v4";
+    public string Model { get; set; } = "glm-5.1";
+    public int TimeoutSeconds { get; set; } = 60;
 }
 
 public sealed class AuthOptions

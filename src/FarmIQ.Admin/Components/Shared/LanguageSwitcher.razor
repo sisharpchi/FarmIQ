@@ -1,0 +1,18 @@
+@inject AdminLocalizer Localizer
+
+<div class="language-switcher">
+    <label class="language-label" for="farmiq-language-switcher">@Localizer["Language"]</label>
+    <select id="farmiq-language-switcher" class="form-select language-select" value="@Localizer.CurrentLanguage" @onchange="HandleLanguageChangedAsync">
+        @foreach (var language in FarmLanguages.Supported)
+        {
+            <option value="@language">@Localizer.LanguageName(language)</option>
+        }
+    </select>
+</div>
+
+@code {
+    private async Task HandleLanguageChangedAsync(ChangeEventArgs args)
+    {
+        await Localizer.SetLanguageAsync(args.Value?.ToString() ?? FarmLanguages.English);
+    }
+}

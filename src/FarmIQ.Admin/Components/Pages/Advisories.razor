@@ -1,25 +1,26 @@
 @page "/advisories"
 @attribute [RouteAccess]
 @inject FarmAdminApiClient ApiClient
+@inject AdminLocalizer Localizer
 
-<PageTitle>Advisories | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Advisories"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>Advisories</h1>
+<h1>@Localizer["Advisories"]</h1>
 
 <div class="page-grid">
     <section class="panel-card">
-        <DataState IsLoading="@_isLoading" IsEmpty="@(_advisories is not null && _advisories.Items.Count == 0)" Error="@_error" LoadingText="Loading advisories..." EmptyText="No advisories available yet." />
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_advisories is not null && _advisories.Items.Count == 0)" Error="@_error" LoadingText="@(Localizer["Loading advisories..."])" EmptyText="@(Localizer["No advisories available yet."])" />
 
         @if (_advisories is not null && string.IsNullOrWhiteSpace(_error))
         {
             <table class="table table-darkless">
                 <thead>
                     <tr>
-                        <th>Disease</th>
-                        <th>Confidence</th>
-                        <th>Source</th>
-                        <th>Follow-up</th>
-                        <th>Language</th>
+                        <th>@Localizer["Disease"]</th>
+                        <th>@Localizer["Confidence"]</th>
+                        <th>@Localizer["Source"]</th>
+                        <th>@Localizer["Follow-up"]</th>
+                        <th>@Localizer["Language"]</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -28,11 +29,11 @@
                     {
                         <tr>
                             <td>@advisory.DiseaseName</td>
-                            <td>@advisory.ConfidenceScore.ToString("P0")</td>
-                            <td>@advisory.AnalysisSource</td>
-                            <td>@(advisory.NeedsCloserPhoto || advisory.NeedsLocation ? "Yes" : "No")</td>
+                            <td>@Localizer.FormatPercent(advisory.ConfidenceScore)</td>
+                            <td>@Localizer.AnalysisSource(advisory.AnalysisSource)</td>
+                            <td>@Localizer.Bool(advisory.NeedsCloserPhoto || advisory.NeedsLocation)</td>
                             <td>@advisory.AdvisoryLanguage</td>
-                            <td><button class="btn btn-sm btn-outline-success" @onclick="() => SelectAdvisoryAsync(advisory.AdvisoryId)">View</button></td>
+                            <td><button class="btn btn-sm btn-outline-success" @onclick="() => SelectAdvisoryAsync(advisory.AdvisoryId)">@Localizer["View"]</button></td>
                         </tr>
                     }
                 </tbody>
@@ -43,25 +44,25 @@
     </section>
 
     <section class="panel-card">
-        <h2>Advisory detail</h2>
+        <h2>@Localizer["Advisory detail"]</h2>
         @if (_detail is null)
         {
-            <p>Select an advisory to view diagnosis, treatment, and weather context.</p>
+            <p>@Localizer["Select an advisory to view diagnosis, treatment, and weather context."]</p>
         }
         else
         {
-            <div class="detail-meta"><strong>@_detail.DiseaseName</strong><span>@_detail.ConfidenceScore.ToString("P0") confidence</span></div>
+            <div class="detail-meta"><strong>@_detail.DiseaseName</strong><span>@ConfidenceLabel(_detail.ConfidenceScore)</span></div>
             <p>@_detail.AdvisoryText</p>
             <ul class="signal-list">
-                <li>Analysis source: @_detail.AnalysisSource</li>
-                <li>Treatment: @_detail.TreatmentRecommendation</li>
-                <li>Harvest timing: @_detail.HarvestTiming</li>
-                <li>Weather: @(string.IsNullOrWhiteSpace(_detail.WeatherSummary) ? "Not available" : _detail.WeatherSummary)</li>
-                <li>Impact: @(string.IsNullOrWhiteSpace(_detail.CropImpact) ? "Not available" : _detail.CropImpact)</li>
-                <li>Needs closer photo: @(_detail.NeedsCloserPhoto ? "Yes" : "No")</li>
-                <li>Needs location: @(_detail.NeedsLocation ? "Yes" : "No")</li>
-                <li>Follow-up question: @(_detail.FollowUpQuestion ?? "None")</li>
-                <li>Reasoning summary: @(_detail.ShortReasoningSummary ?? "None")</li>
+                <li>@DetailLine("Analysis source", Localizer.AnalysisSource(_detail.AnalysisSource))</li>
+                <li>@DetailLine("Treatment", _detail.TreatmentRecommendation)</li>
+                <li>@DetailLine("Harvest timing", _detail.HarvestTiming)</li>
+                <li>@DetailLine("Weather", string.IsNullOrWhiteSpace(_detail.WeatherSummary) ? Localizer["Not available"] : _detail.WeatherSummary)</li>
+                <li>@DetailLine("Impact", string.IsNullOrWhiteSpace(_detail.CropImpact) ? Localizer["Not available"] : _detail.CropImpact)</li>
+                <li>@DetailLine("Needs closer photo", Localizer.Bool(_detail.NeedsCloserPhoto))</li>
+                <li>@DetailLine("Needs location", Localizer.Bool(_detail.NeedsLocation))</li>
+                <li>@DetailLine("Follow-up question", _detail.FollowUpQuestion ?? Localizer["None"])</li>
+                <li>@DetailLine("Reasoning summary", _detail.ShortReasoningSummary ?? Localizer["None"])</li>
             </ul>
         }
     </section>
@@ -102,4 +103,49 @@
         _page = page;
         await LoadAsync();
     }
+
+    private string ConfidenceLabel(decimal value) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => $"Уверенность: {Localizer.FormatPercent(value)}",
+        FarmLanguages.Uzbek => $"Ishonchlilik: {Localizer.FormatPercent(value)}",
+        _ => $"{Localizer.FormatPercent(value)} confidence"
+    };
+
+    private string DetailLine(string label, string value) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => $"{TranslateLabel(label)}: {value}",
+        FarmLanguages.Uzbek => $"{TranslateLabel(label)}: {value}",
+        _ => $"{label}: {value}"
+    };
+
+    private string TranslateLabel(string label) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => label switch
+        {
+            "Analysis source" => "Источник анализа",
+            "Treatment" => "Рекомендация",
+            "Harvest timing" => "Срок сбора",
+            "Weather" => "Погода",
+            "Impact" => "Влияние",
+            "Needs closer photo" => "Нужно более близкое фото",
+            "Needs location" => "Нужна геолокация",
+            "Follow-up question" => "Уточняющий вопрос",
+            "Reasoning summary" => "Краткое объяснение",
+            _ => label
+        },
+        FarmLanguages.Uzbek => label switch
+        {
+            "Analysis source" => "Tahlil manbasi",
+            "Treatment" => "Tavsiya",
+            "Harvest timing" => "Hosil muddati",
+            "Weather" => "Ob-havo",
+            "Impact" => "Ta'sir",
+            "Needs closer photo" => "Yaqinroq rasm kerak",
+            "Needs location" => "Joylashuv kerak",
+            "Follow-up question" => "Qo'shimcha savol",
+            "Reasoning summary" => "Qisqa izoh",
+            _ => label
+        },
+        _ => label
+    };
 }

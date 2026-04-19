@@ -1,5 +1,6 @@
 @inject NavigationManager Navigation
 @inject IAuthService AuthService
+@inject AdminLocalizer Localizer
 
 <AuthorizeView>
     <Authorized Context="authState">
@@ -10,30 +11,30 @@
         }
         <div class="session-card">
             <div class="session-name">@authState.User.Identity?.Name</div>
-            <div class="session-roles">@string.Join(" | ", authState.User.Claims.Where(x => x.Type.Contains("role", StringComparison.OrdinalIgnoreCase)).Select(x => x.Value))</div>
+            <div class="session-roles">@string.Join(" | ", authState.User.Claims.Where(x => x.Type.Contains("role", StringComparison.OrdinalIgnoreCase)).Select(x => Localizer.Role(x.Value)))</div>
         </div>
 
         <nav class="nav-links">
-            <NavLink class="nav-link" href="/dashboard">Dashboard</NavLink>
-            <NavLink class="nav-link" href="/conversations">Conversations</NavLink>
+            <NavLink class="nav-link" href="/dashboard">@Localizer["Dashboard"]</NavLink>
+            <NavLink class="nav-link" href="/conversations">@Localizer["Conversations"]</NavLink>
             @if (canOperate)
             {
-                <NavLink class="nav-link" href="/jobs">Jobs</NavLink>
-                <NavLink class="nav-link" href="/deliveries">Deliveries</NavLink>
+                <NavLink class="nav-link" href="/jobs">@Localizer["Jobs"]</NavLink>
+                <NavLink class="nav-link" href="/deliveries">@Localizer["Deliveries"]</NavLink>
             }
-            <NavLink class="nav-link" href="/advisories">Advisories</NavLink>
-            <NavLink class="nav-link" href="/system">System</NavLink>
+            <NavLink class="nav-link" href="/advisories">@Localizer["Advisories"]</NavLink>
+            <NavLink class="nav-link" href="/system">@Localizer["System"]</NavLink>
             @if (isAdmin)
             {
-                <NavLink class="nav-link" href="/users">Users</NavLink>
+                <NavLink class="nav-link" href="/users">@Localizer["Users"]</NavLink>
             }
         </nav>
 
-        <button class="btn btn-light logout-button" @onclick="LogoutAsync">Sign out</button>
+        <button class="btn btn-light logout-button" @onclick="LogoutAsync">@Localizer["Sign out"]</button>
     </Authorized>
     <NotAuthorized>
         <nav class="nav-links">
-            <NavLink class="nav-link" href="/login">Login</NavLink>
+            <NavLink class="nav-link" href="/login">@Localizer["Login"]</NavLink>
         </nav>
     </NotAuthorized>
 </AuthorizeView>

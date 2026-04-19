@@ -1,10 +1,11 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 
 <div class="app-shell">
     <aside class="sidebar">
         <div class="brand-block">
-            <div class="brand-kicker">FarmIQ Admin</div>
-            <div class="brand-title">Crop advisory control center</div>
+            <div class="brand-kicker">@Localizer["FarmIQ Admin"]</div>
+            <div class="brand-title">@Localizer["Crop advisory control center"]</div>
         </div>
         <NavMenu />
     </aside>
@@ -12,9 +13,10 @@
     <main class="main-panel">
         <header class="topbar">
             <div>
-                <div class="topbar-label">Operations dashboard</div>
-                <div class="topbar-title">Rural advisory monitoring, diagnostics, and response</div>
+                <div class="topbar-label">@Localizer["Operations dashboard"]</div>
+                <div class="topbar-title">@Localizer["Rural advisory monitoring, diagnostics, and response"]</div>
             </div>
+            <LanguageSwitcher />
         </header>
 
         <section class="content-panel">
@@ -22,3 +24,13 @@
         </section>
     </main>
 </div>
+
+@code {
+    [Inject] private AdminLocalizer Localizer { get; set; } = default!;
+
+    protected override void OnInitialized() => Localizer.Changed += HandleLanguageChanged;
+
+    public void Dispose() => Localizer.Changed -= HandleLanguageChanged;
+
+    private void HandleLanguageChanged() => InvokeAsync(StateHasChanged);
+}

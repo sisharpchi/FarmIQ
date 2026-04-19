@@ -1,18 +1,19 @@
 @page "/conversations"
 @attribute [RouteAccess]
 @inject FarmAdminApiClient ApiClient
+@inject AdminLocalizer Localizer
 
-<PageTitle>Conversations | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Conversations"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>Conversations</h1>
+<h1>@Localizer["Conversations"]</h1>
 
 <div class="page-grid">
     <section class="panel-card">
         <div class="table-tools">
-            <button class="btn btn-outline-success" @onclick="LoadAsync">Refresh</button>
+            <button class="btn btn-outline-success" @onclick="LoadAsync">@Localizer["Refresh"]</button>
         </div>
 
-        <DataState IsLoading="@_isLoading" IsEmpty="@(_response is not null && _response.Items.Count == 0)" Error="@_error" LoadingText="Loading conversations..." EmptyText="No farmer conversations are available yet." />
+        <DataState IsLoading="@_isLoading" IsEmpty="@(_response is not null && _response.Items.Count == 0)" Error="@_error" LoadingText="@(Localizer["Loading conversations..."])" EmptyText="@(Localizer["No farmer conversations are available yet."])" />
 
         @if (_response is not null && string.IsNullOrWhiteSpace(_error))
         {
@@ -20,13 +21,13 @@
                 <thead>
                     <tr>
                         <th>Farmer</th>
-                        <th>Channel</th>
+                        <th>@Localizer["Channel"]</th>
                         <th>Intent</th>
-                        <th>State</th>
-                        <th>Location</th>
+                        <th>@Localizer["Status"]</th>
+                        <th>@Localizer["Location"]</th>
                         <th>Inbound</th>
                         <th>Outbound</th>
-                        <th>Last message</th>
+                        <th>@Localizer["Last message"]</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -35,16 +36,16 @@
                     {
                         <tr>
                             <td>@item.FarmerName</td>
-                            <td>@item.ChannelType</td>
-                            <td>@item.LastDetectedIntent</td>
-                            <td>@item.AssistantState</td>
-                            <td>@(item.LocationKnown ? "Saved" : "Missing")</td>
+                            <td>@Localizer.Channel(item.ChannelType)</td>
+                            <td>@Localizer.Intent(item.LastDetectedIntent)</td>
+                            <td>@Localizer.AssistantState(item.AssistantState)</td>
+                            <td>@(item.LocationKnown ? Localizer["Saved"] : Localizer["Missing"])</td>
                             <td>@item.InboundCount</td>
                             <td>@item.OutboundCount</td>
-                            <td>@item.LastMessageUtc.ToLocalTime().ToString("g")</td>
+                            <td>@Localizer.FormatDateTime(item.LastMessageUtc.ToLocalTime())</td>
                             <td>
                                 <button class="btn btn-sm btn-outline-success" @onclick="() => SelectConversationAsync(item.ConversationId)">
-                                    View
+                                    @Localizer["View"]
                                 </button>
                             </td>
                         </tr>
@@ -57,7 +58,7 @@
     </section>
 
     <section class="panel-card">
-        <h2>Conversation detail</h2>
+        <h2>@Localizer["Conversation detail"]</h2>
 
         @if (!string.IsNullOrWhiteSpace(_detailError))
         {
@@ -65,21 +66,21 @@
         }
         else if (_detail is null)
         {
-            <p>Select a conversation to inspect the message timeline.</p>
+            <p>@Localizer["Select a conversation to inspect the message timeline."]</p>
         }
         else
         {
             <div class="detail-meta">
                 <strong>@_detail.FarmerName</strong>
-                <span>@_detail.ChannelType | @_detail.LastMessageUtc.ToLocalTime().ToString("g")</span>
+                <span>@Localizer.Channel(_detail.ChannelType) | @Localizer.FormatDateTime(_detail.LastMessageUtc.ToLocalTime())</span>
             </div>
 
             <ul class="signal-list">
-                <li>Assistant state: @_detail.AssistantState</li>
-                <li>Last detected intent: @_detail.LastDetectedIntent</li>
-                <li>Location known: @(_detail.LocationKnown ? "Yes" : "No")</li>
-                <li>Last bot prompt: @(_detail.LastBotPromptUtc?.ToLocalTime().ToString("g") ?? "Not yet")</li>
-                <li>Location requested: @(_detail.LocationRequestedUtc?.ToLocalTime().ToString("g") ?? "No")</li>
+                <li>@DetailLine("Assistant state", Localizer.AssistantState(_detail.AssistantState))</li>
+                <li>@DetailLine("Last detected intent", Localizer.Intent(_detail.LastDetectedIntent))</li>
+                <li>@DetailLine("Location known", Localizer.Bool(_detail.LocationKnown))</li>
+                <li>@DetailLine("Last bot prompt", Localizer.FormatNullableDateTime(_detail.LastBotPromptUtc?.ToLocalTime(), "Not available"))</li>
+                <li>@DetailLine("Location requested", Localizer.FormatNullableDateTime(_detail.LocationRequestedUtc?.ToLocalTime(), "No"))</li>
             </ul>
 
             <div class="timeline">
@@ -87,17 +88,17 @@
                 {
                     <div class="timeline-item">
                         <div class="timeline-head">
-                            <span>@message.Direction</span>
-                            <span>@message.CreatedUtc.ToLocalTime().ToString("g")</span>
+                            <span>@Localizer.Direction(message.Direction)</span>
+                            <span>@Localizer.FormatDateTime(message.CreatedUtc.ToLocalTime())</span>
                         </div>
                         @if (message.IntentType.HasValue)
                         {
-                            <div class="subtle-copy">Intent: @message.IntentType</div>
+                            <div class="subtle-copy">@DetailLine("Intent", Localizer.Intent(message.IntentType))</div>
                         }
-                        <div>@(string.IsNullOrWhiteSpace(message.Text) ? "No text payload was captured for this event." : message.Text)</div>
+                        <div>@(string.IsNullOrWhiteSpace(message.Text) ? Localizer["No text payload was captured for this event."] : message.Text)</div>
                         @if (!string.IsNullOrWhiteSpace(message.IgnoredReason))
                         {
-                            <div class="subtle-copy">Ignored reason: @message.IgnoredReason</div>
+                            <div class="subtle-copy">@DetailLine("Ignored reason", message.IgnoredReason)</div>
                         }
                     </div>
                 }
@@ -153,4 +154,38 @@
         _page = page;
         await LoadAsync();
     }
+
+    private string DetailLine(string label, string value) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => $"{TranslateLabel(label)}: {value}",
+        FarmLanguages.Uzbek => $"{TranslateLabel(label)}: {value}",
+        _ => $"{label}: {value}"
+    };
+
+    private string TranslateLabel(string label) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => label switch
+        {
+            "Assistant state" => "Состояние ассистента",
+            "Last detected intent" => "Последний распознанный интент",
+            "Location known" => "Локация известна",
+            "Last bot prompt" => "Последний бот-запрос",
+            "Location requested" => "Когда просили геолокацию",
+            "Intent" => "Интент",
+            "Ignored reason" => "Причина игнорирования",
+            _ => label
+        },
+        FarmLanguages.Uzbek => label switch
+        {
+            "Assistant state" => "Assistant holati",
+            "Last detected intent" => "Oxirgi aniqlangan intent",
+            "Location known" => "Joylashuv ma'lum",
+            "Last bot prompt" => "Botning oxirgi prompti",
+            "Location requested" => "Joylashuv so'ralgan vaqt",
+            "Intent" => "Intent",
+            "Ignored reason" => "Ignore sababi",
+            _ => label
+        },
+        _ => label
+    };
 }

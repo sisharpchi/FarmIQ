@@ -1,0 +1,11 @@
+@inject AdminLocalizer Localizer
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !Localizer.IsInitialized)
+        {
+            await Localizer.RestoreAsync();
+        }
+    }
+}

@@ -1,16 +1,19 @@
+@implements IDisposable
 @inject FarmAuthStateProvider AuthStateProvider
+@inject AdminLocalizer Localizer
 
 <CascadingAuthenticationState>
     <AuthBootstrap />
+    <LocalizationBootstrap />
 
-    @if (!AuthStateProvider.IsInitialized)
+    @if (!AuthStateProvider.IsInitialized || !Localizer.IsInitialized)
     {
         <LayoutView Layout="typeof(EmptyLayout)">
             <div class="login-shell">
                 <div class="login-panel">
-                    <div class="login-kicker">FarmIQ Admin</div>
-                    <h1>Restoring your operations session</h1>
-                    <p class="login-copy">Loading the control center and validating the local admin session.</p>
+                    <div class="login-kicker">@Localizer["FarmIQ Admin"]</div>
+                    <h1>@Localizer["Restoring your operations session"]</h1>
+                    <p class="login-copy">@Localizer["Loading the control center and validating the local admin session."]</p>
                 </div>
             </div>
         </LayoutView>
@@ -33,8 +36,8 @@
                 {
                     <LayoutView Layout="typeof(Layout.MainLayout)">
                         <div class="panel-card">
-                            <h1>Access denied</h1>
-                            <p class="subtle-copy">Your current FarmIQ role does not allow access to this area.</p>
+                            <h1>@Localizer["Access denied"]</h1>
+                            <p class="subtle-copy">@Localizer["Your current FarmIQ role does not allow access to this area."]</p>
                         </div>
                     </LayoutView>
                 }
@@ -47,7 +50,7 @@
             </Found>
             <NotFound>
                 <LayoutView Layout="typeof(Layout.MainLayout)">
-                    <p class="empty-state">Nothing matched that route.</p>
+                    <p class="empty-state">@Localizer["Nothing matched that route."]</p>
                 </LayoutView>
             </NotFound>
         </Router>
@@ -55,6 +58,8 @@
 </CascadingAuthenticationState>
 
 @code {
+    protected override void OnInitialized() => Localizer.Changed += HandleLanguageChanged;
+
     private static bool IsPublic(Type pageType) =>
         Attribute.IsDefined(pageType, typeof(PublicPageAttribute), inherit: true);
 
@@ -74,4 +79,8 @@
         return access.Roles.Any(requiredRole =>
             roles.Contains(requiredRole, StringComparer.OrdinalIgnoreCase));
     }
+
+    public void Dispose() => Localizer.Changed -= HandleLanguageChanged;
+
+    private void HandleLanguageChanged() => InvokeAsync(StateHasChanged);
 }

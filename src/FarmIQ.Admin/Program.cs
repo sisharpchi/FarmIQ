@@ -17,9 +17,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<BrowserPreferenceStore>();
 builder.Services.AddScoped<BrowserSessionStore>();
 builder.Services.AddScoped<FarmAuthStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<FarmAuthStateProvider>());
+builder.Services.AddScoped<AdminLocalizer>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<FarmAdminApiClient>();
 builder.Services.AddScoped<RefreshCoordinator>();

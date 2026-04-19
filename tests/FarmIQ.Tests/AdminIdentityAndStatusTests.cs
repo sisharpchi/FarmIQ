@@ -149,6 +149,8 @@ public sealed class AdminIdentityAndStatusTests
             ["OpenWeatherMap:BaseUrl"] = "https://api.openweathermap.org/data/2.5",
             ["OpenAI:Enabled"] = "true",
             ["OpenAI:ApiKey"] = "test-key",
+            ["Glm:Enabled"] = "true",
+            ["Glm:ApiKey"] = "glm-test-key",
             ["ConnectionStrings:DefaultConnection"] = "Host=localhost;Database=farmiq;Username=postgres;Password=postgres"
         }).Build();
 
@@ -159,6 +161,7 @@ public sealed class AdminIdentityAndStatusTests
         status.WorkerPollIntervalSeconds.Should().Be(45);
         status.DatabaseConfigured.Should().BeTrue();
         status.OpenAiConfigured.Should().BeTrue();
+        status.GlmConfigured.Should().BeTrue();
     }
 
     private static FarmIQDbContext CreateDbContext()

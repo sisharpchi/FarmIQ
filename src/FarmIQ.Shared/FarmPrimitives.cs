@@ -72,7 +72,8 @@ public enum AdvisoryStatus
 public enum AdvisoryAnalysisSource
 {
     Fallback = 0,
-    OpenAi = 1
+    OpenAi = 1,
+    Glm = 2
 }
 
 public enum OutboundDeliveryStatus
@@ -83,3 +84,39 @@ public enum OutboundDeliveryStatus
 }
 
 public sealed record PagedResponse<T>(IReadOnlyCollection<T> Items, int TotalCount, int Page, int PageSize);
+
+public static class FarmLanguages
+{
+    public const string English = "en";
+    public const string Russian = "ru";
+    public const string Uzbek = "uz";
+
+    public static readonly IReadOnlyCollection<string> Supported = [English, Russian, Uzbek];
+
+    public static string Normalize(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language))
+        {
+            return English;
+        }
+
+        var value = language.Trim().ToLowerInvariant();
+
+        if (value.StartsWith("ru") || value.Contains("russian") || value.Contains("рус"))
+        {
+            return Russian;
+        }
+
+        if (value.StartsWith("uz") || value.Contains("uzbek") || value.Contains("o'zbek") || value.Contains("ўзбек"))
+        {
+            return Uzbek;
+        }
+
+        if (value.StartsWith("en") || value.Contains("english"))
+        {
+            return English;
+        }
+
+        return Supported.Contains(value, StringComparer.OrdinalIgnoreCase) ? value : English;
+    }
+}

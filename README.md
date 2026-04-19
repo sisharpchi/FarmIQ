@@ -588,3 +588,7 @@ FarmIQ hozirgi holatda ichki ops/admin platforma sifatida ishlashga tayyorlangan
 - Docker Compose deploy tayyor
 
 Ya'ni bu faqat demo emas, balki real startup backendini productionga olib chiqish uchun kerak bo'ladigan asosiy karkas va operatsion qatlamlarni o'z ichiga oladi.
+
+## 21. Qo'shimcha qo'llanmalar
+
+- Telegram + ngrok orqali local webhook test qilish: [telegram-ngrok-setup.md](/D:/sisharpchi/FarmIQ/docs/telegram-ngrok-setup.md)

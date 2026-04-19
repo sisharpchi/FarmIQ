@@ -256,7 +256,7 @@ public sealed class ConversationResponseComposer(ILanguageService languageServic
             ? farmer.PreferredLanguage
             : command.IncomingLanguage;
 
-        var localized = await languageService.TranslateFromEnglishAsync(english, targetLanguage ?? "en", cancellationToken);
+        var localized = await languageService.TranslateFromEnglishAsync(english, FarmLanguages.Normalize(targetLanguage), cancellationToken);
         return new ComposedConversationResponse(
             localized.Trim(),
             command.IntentType == InboundIntentType.LocationShare ? ConversationAssistantState.AwaitingProblemDetails : ConversationAssistantState.AwaitingProblemDetails,

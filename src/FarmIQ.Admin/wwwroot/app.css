@@ -97,6 +97,10 @@ h1, h2 {
     border: 1px solid rgba(25, 49, 31, 0.08);
     border-radius: 24px;
     backdrop-filter: blur(10px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
 }
 
 .topbar-label {
@@ -315,6 +319,38 @@ h1, h2 {
     font-weight: 700;
 }
 
+.language-switcher {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 160px;
+}
+
+.language-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #5f7a64;
+}
+
+.language-select {
+    border-radius: 14px;
+    min-width: 160px;
+}
+
+.empty-layout {
+    min-height: 100vh;
+}
+
+.empty-layout-header {
+    display: flex;
+    justify-content: flex-end;
+    padding: 1rem 1.5rem 0;
+}
+
+.empty-layout-body {
+    min-height: calc(100vh - 4rem);
+}
+
 .loading-copy {
     color: #57725d;
 }
@@ -334,5 +370,13 @@ h1, h2 {
 
     .sidebar {
         padding-bottom: 1rem;
+    }
+
+    .topbar {
+        flex-direction: column;
+    }
+
+    .empty-layout-header {
+        justify-content: center;
     }
 }

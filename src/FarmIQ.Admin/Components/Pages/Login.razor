@@ -5,25 +5,26 @@
 @inject FarmAuthStateProvider AuthStateProvider
 @inject IConfiguration Configuration
 @inject NavigationManager Navigation
+@inject AdminLocalizer Localizer
 
-<PageTitle>Login | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["Login"] + " | FarmIQ Admin")</PageTitle>
 
 <div class="login-shell">
     <div class="login-panel">
-        <div class="login-kicker">FarmIQ Admin</div>
-        <h1>Sign in to the field operations console</h1>
-        <p class="login-copy">Monitor farmer conversations, troubleshoot delivery issues, and recover advisory jobs from one place.</p>
+        <div class="login-kicker">@Localizer["FarmIQ Admin"]</div>
+        <h1>@Localizer["Sign in to the field operations console"]</h1>
+        <p class="login-copy">@Localizer["Monitor farmer conversations, troubleshoot delivery issues, and recover advisory jobs from one place."]</p>
 
         <EditForm Model="_model" OnValidSubmit="HandleLoginAsync">
             <DataAnnotationsValidator />
 
             <div class="form-field">
-                <label>Email</label>
+                <label>@Localizer["Email"]</label>
                 <InputText class="form-control" @bind-Value="_model.Email" />
             </div>
 
             <div class="form-field">
-                <label>Password</label>
+                <label>@Localizer["Password"]</label>
                 <InputText class="form-control" type="password" @bind-Value="_model.Password" />
             </div>
 
@@ -33,21 +34,21 @@
             }
 
             <button class="btn btn-success login-button" type="submit" disabled="@_isSubmitting">
-                @(_isSubmitting ? "Signing in..." : "Sign in")
+                @(_isSubmitting ? Localizer["Signing in..."] : Localizer["Sign in"])
             </button>
         </EditForm>
 
         @if (PublicSignupEnabled)
         {
             <div class="auth-switch-copy">
-                Need an account?
-                <a href="/signup">Create one here</a>
+                @Localizer["Need an account?"]
+                <a href="/signup">@Localizer["Create one here"]</a>
             </div>
         }
         else
         {
             <div class="auth-switch-copy">
-                Invite-only access is enabled. Ask an existing admin to provision your account.
+                @Localizer["Invite-only access is enabled. Ask an existing admin to provision your account."]
             </div>
         }
     </div>

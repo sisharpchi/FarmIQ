@@ -1,46 +1,49 @@
 @page "/system"
 @attribute [RouteAccess]
 @inject FarmAdminApiClient ApiClient
+@inject AdminLocalizer Localizer
 
-<PageTitle>System | FarmIQ Admin</PageTitle>
+<PageTitle>@(Localizer["System"] + " | FarmIQ Admin")</PageTitle>
 
-<h1>System</h1>
+<h1>@Localizer["System"]</h1>
 
-<DataState IsLoading="@_isLoading" IsEmpty="false" Error="@_error" LoadingText="Loading system status..." />
+<DataState IsLoading="@_isLoading" IsEmpty="false" Error="@_error" LoadingText="@(Localizer["Loading system status..."])" />
 
 @if (_status is not null && string.IsNullOrWhiteSpace(_error))
 {
     <div class="page-grid">
         <section class="panel-card">
-            <h2>Service health</h2>
+            <h2>@Localizer["Service health"]</h2>
             <div class="status-grid">
-                <div class="@StatusClass(_healthOk)">API health</div>
-                <div class="@StatusClass(_status.DatabaseConfigured)">Database</div>
-                <div class="@StatusClass(_status.StorageConfigured)">Storage</div>
-                <div class="@StatusClass(_status.WeatherConfigured)">Weather</div>
+                <div class="@StatusClass(_healthOk)">API</div>
+                <div class="@StatusClass(_status.DatabaseConfigured)">@Localizer["Database"]</div>
+                <div class="@StatusClass(_status.StorageConfigured)">@Localizer["Storage"]</div>
+                <div class="@StatusClass(_status.WeatherConfigured)">@Localizer["Weather"]</div>
+                <div class="@StatusClass(_status.GlmConfigured)">GLM-5.1</div>
                 <div class="@StatusClass(_status.OpenAiConfigured)">OpenAI</div>
             </div>
         </section>
 
         <section class="panel-card">
-            <h2>Channel readiness</h2>
+            <h2>@Localizer["Channel readiness"]</h2>
             <div class="status-grid">
                 <div class="@StatusClass(_status.WhatsAppConfigured)">WhatsApp</div>
                 <div class="@StatusClass(_status.TelegramConfigured)">Telegram</div>
                 <div class="@StatusClass(_status.InstagramConfigured)">Instagram</div>
             </div>
-            <p class="subtle-copy">Server UTC: @_status.ServerUtc.ToString("u")</p>
+            <p class="subtle-copy">@SystemLine("Server UTC", _status.ServerUtc.ToString("u", System.Globalization.CultureInfo.InvariantCulture))</p>
         </section>
 
         <section class="panel-card">
-            <h2>Operational guidance</h2>
+            <h2>@Localizer["Operational guidance"]</h2>
             <ul class="signal-list">
-                <li>Use the Jobs page to retry failed advisory processing runs.</li>
-                <li>Use Deliveries to inspect duplicate webhook events before escalating channel issues.</li>
-                <li>Confirm at least one channel and storage are configured before onboarding live farmers.</li>
-                <li>Public signup is @(_status.PublicSignupEnabled ? "enabled" : "disabled") for this deployment.</li>
-                <li>Worker fallback poll interval: @_status.WorkerPollIntervalSeconds seconds.</li>
-                <li>OpenAI analysis is @(_status.OpenAiConfigured ? "configured" : "not configured") for this environment.</li>
+                <li>@GuidanceRetry()</li>
+                <li>@GuidanceDeliveries()</li>
+                <li>@GuidanceChannelStorage()</li>
+                <li>@GuidanceSignup()</li>
+                <li>@GuidancePoll()</li>
+                <li>@GuidanceGlm()</li>
+                <li>@GuidanceOpenAi()</li>
             </ul>
         </section>
     </div>
@@ -72,4 +75,111 @@
     }
 
     private static string StatusClass(bool ok) => ok ? "status-pill ok" : "status-pill bad";
+
+    private string SystemLine(string label, string value) => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => label switch
+        {
+            "Server UTC" => $"UTC сервера: {value}",
+            _ => $"{label}: {value}"
+        },
+        FarmLanguages.Uzbek => label switch
+        {
+            "Server UTC" => $"Server UTC: {value}",
+            _ => $"{label}: {value}"
+        },
+        _ => $"{label}: {value}"
+    };
+
+    private string GuidanceRetry() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Используйте страницу Jobs для повторного запуска неудачных advisory-задач.",
+        FarmLanguages.Uzbek => "Xatoli advisory processing ishlarini qayta urinish uchun Jobs sahifasidan foydalaning.",
+        _ => "Use the Jobs page to retry failed advisory processing runs."
+    };
+
+    private string GuidanceDeliveries() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Используйте Deliveries, чтобы проверить дубликаты webhook-событий перед эскалацией проблем канала.",
+        FarmLanguages.Uzbek => "Kanal muammosini escalatsiya qilishdan oldin duplicate webhook eventlarni Deliveries sahifasida tekshiring.",
+        _ => "Use Deliveries to inspect duplicate webhook events before escalating channel issues."
+    };
+
+    private string GuidanceChannelStorage() => Localizer.CurrentLanguage switch
+    {
+        FarmLanguages.Russian => "Перед подключением реальных фермеров убедитесь, что настроен хотя бы один канал и хранилище.",
+        FarmLanguages.Uzbek => "Real fermerlarni ulashdan oldin kamida bitta kanal va storage sozlanganini tasdiqlang.",
+        _ => "Confirm at least one channel and storage are configured before onboarding live farmers."
+    };
+
+    private string GuidanceSignup()
+    {
+        var enabled = _status?.PublicSignupEnabled == true;
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Russian)
+        {
+            var state = enabled ? "включена" : "отключена";
+            return $"Публичная регистрация для этого развёртывания {state}.";
+        }
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Uzbek)
+        {
+            var state = enabled ? "yoqilgan" : "o'chirilgan";
+            return $"Bu deploy uchun public signup {state}.";
+        }
+
+        var englishState = enabled ? "enabled" : "disabled";
+        return $"Public signup is {englishState} for this deployment.";
+    }
+
+    private string GuidancePoll()
+    {
+        var seconds = _status?.WorkerPollIntervalSeconds;
+        return Localizer.CurrentLanguage switch
+        {
+            FarmLanguages.Russian => $"Интервал резервного опроса worker: {seconds} сек.",
+            FarmLanguages.Uzbek => $"Worker fallback poll intervali: {seconds} soniya.",
+            _ => $"Worker fallback poll interval: {seconds} seconds."
+        };
+    }
+
+    private string GuidanceOpenAi()
+    {
+        var configured = _status?.OpenAiConfigured == true;
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Russian)
+        {
+            var state = configured ? "настроен" : "не настроен";
+            return $"OpenAI-анализ для этой среды {state}.";
+        }
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Uzbek)
+        {
+            var state = configured ? "sozlangan" : "sozlanmagan";
+            return $"Bu muhit uchun OpenAI tahlili {state}.";
+        }
+
+        var englishState = configured ? "configured" : "not configured";
+        return $"OpenAI analysis is {englishState} for this environment.";
+    }
+
+    private string GuidanceGlm()
+    {
+        var configured = _status?.GlmConfigured == true;
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Russian)
+        {
+            var state = configured ? "настроен" : "не настроен";
+            return $"GLM-5.1 text-анализ для этой среды {state}.";
+        }
+
+        if (Localizer.CurrentLanguage == FarmLanguages.Uzbek)
+        {
+            var state = configured ? "sozlangan" : "sozlanmagan";
+            return $"Bu muhit uchun GLM-5.1 matnli tahlili {state}.";
+        }
+
+        var englishState = configured ? "configured" : "not configured";
+        return $"GLM-5.1 text analysis is {englishState} for this environment.";
+    }
 }

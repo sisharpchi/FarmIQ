@@ -1,9 +1,11 @@
+@inject AdminLocalizer Localizer
+
 @if (TotalCount > PageSize)
 {
     <div class="pagination-bar">
-        <button class="btn btn-outline-success btn-sm" disabled="@(Page <= 1)" @onclick="() => OnPageChanged.InvokeAsync(Page - 1)">Previous</button>
-        <span>Page @Page of @TotalPages</span>
-        <button class="btn btn-outline-success btn-sm" disabled="@(Page >= TotalPages)" @onclick="() => OnPageChanged.InvokeAsync(Page + 1)">Next</button>
+        <button class="btn btn-outline-success btn-sm" disabled="@(Page <= 1)" @onclick="() => OnPageChanged.InvokeAsync(Page - 1)">@Localizer["Previous"]</button>
+        <span>@Localizer.Format("Page {0} of {1}", Page, TotalPages)</span>
+        <button class="btn btn-outline-success btn-sm" disabled="@(Page >= TotalPages)" @onclick="() => OnPageChanged.InvokeAsync(Page + 1)">@Localizer["Next"]</button>
     </div>
 }
 
